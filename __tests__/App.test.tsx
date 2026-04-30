@@ -4,22 +4,40 @@ import { Alert, Linking } from 'react-native';
 
 import App from '../App';
 import { BlurryImageError } from '../lib/ocr';
+import { ScanCardInvokeError } from '../src/lib/scanCard';
 
 const mockUseCameraPermissions = jest.fn();
 const mockTakePictureAsync = jest.fn();
 const mockExtractText = jest.fn();
+const mockPrepareImage = jest.fn();
+const mockUploadCardImage = jest.fn();
+const mockInvokeScanCard = jest.fn();
 
 jest.mock('expo-image-picker', () => ({
   launchImageLibraryAsync: jest.fn()
 }));
 
 jest.mock('../src/lib/imagePrep', () => ({
-  prepareImage: jest.fn()
+  prepareImage: (...args: unknown[]) => mockPrepareImage(...args)
 }));
 
 jest.mock('../src/lib/upload', () => ({
-  uploadCardImage: jest.fn()
+  uploadCardImage: (...args: unknown[]) => mockUploadCardImage(...args)
 }));
+
+jest.mock('../src/lib/scanCard', () => {
+  class MockScanCardInvokeError extends Error {
+    constructor(message: string) {
+      super(message);
+      this.name = 'ScanCardInvokeError';
+    }
+  }
+
+  return {
+    ScanCardInvokeError: MockScanCardInvokeError,
+    invokeScanCard: (...args: unknown[]) => mockInvokeScanCard(...args)
+  };
+});
 
 jest.mock('expo-camera', () => {
   const React = require('react');
@@ -54,6 +72,20 @@ jest.mock('../lib/ocr', () => {
 describe('App permissions flow', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+
+    mockPrepareImage.mockResolvedValue({ cachePath: 'file:///cache/prepared.jpg' });
+    mockExtractText.mockResolvedValue('John Doe\\nAcme Corp\\nSales Manager');
+    mockUploadCardImage.mockResolvedValue('card-images/user-123/lead-456.jpg');
+    mockInvokeScanCard.mockResolvedValue({
+      parseStatus: 'parsed',
+      parsed: {
+        companyName: 'Acme Corp',
+        email: 'john@acme.com',
+        fullName: 'John Doe',
+        jobTitle: 'Sales Manager',
+        phoneNumber: '+1 555 111 2222'
+      }
+    });
   });
 
   it('renders denied screen and opens settings when permission is denied', () => {
@@ -94,59 +126,45 @@ describe('App permissions flow', () => {
     expect(screen.getByText('Upload')).toBeTruthy();
   });
 
-  it('captures once per tap burst, shows preview briefly, then returns to camera', async () => {
-    jest.useFakeTimers();
+  it('captures once per tap burst while the capture call is in flight', async () => {
+    mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
 
-    try {
-      mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+    let resolveCapture: ((value: { uri: string; width: number; height: number }) => void) | null = null;
 
-      let resolveCapture: ((value: { uri: string; width: number; height: number }) => void) | null =
-        null;
+    mockTakePictureAsync.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveCapture = resolve;
+        })
+    );
 
-      mockTakePictureAsync.mockImplementation(
-        () =>
-          new Promise((resolve) => {
-            resolveCapture = resolve;
-          })
-      );
+    render(<App />);
 
-      render(<App />);
+    const captureButton = screen.getByTestId('capture-button');
 
-      const captureButton = screen.getByTestId('capture-button');
+    fireEvent.press(captureButton);
+    fireEvent.press(captureButton);
 
-      fireEvent.press(captureButton);
-      fireEvent.press(captureButton);
+    expect(mockTakePictureAsync).toHaveBeenCalledTimes(1);
+    expect(mockTakePictureAsync).toHaveBeenCalledWith({
+      quality: 0.7,
+      skipProcessing: true
+    });
+    expect(screen.getByTestId('capture-button').props.accessibilityState?.disabled).toBe(true);
 
-      expect(mockTakePictureAsync).toHaveBeenCalledTimes(1);
-      expect(mockTakePictureAsync).toHaveBeenCalledWith({
-        quality: 0.7,
-        skipProcessing: true
+    await act(async () => {
+      resolveCapture?.({
+        height: 100,
+        uri: 'file:///tmp/card.jpg',
+        width: 200
       });
-      expect(screen.getByTestId('capture-button').props.accessibilityState?.disabled).toBe(true);
+      await Promise.resolve();
+    });
 
-      await act(async () => {
-        resolveCapture?.({
-          height: 100,
-          uri: 'file:///tmp/card.jpg',
-          width: 200
-        });
-        await Promise.resolve();
-      });
-
-      expect(screen.getByTestId('capture-preview')).toBeTruthy();
-
-      act(() => {
-        jest.advanceTimersByTime(500);
-      });
-
-      expect(screen.queryByTestId('capture-preview')).toBeNull();
-      expect(screen.getByTestId('capture-button').props.accessibilityState?.disabled).toBe(false);
-    } finally {
-      jest.useRealTimers();
-    }
+    expect(screen.getByTestId('capture-button').props.accessibilityState?.disabled).toBe(false);
   });
 
-  it('shows OCR text in a dev-only alert after capture', async () => {
+  it('runs prepare -> OCR -> upload -> invoke sequentially with shared leadId and spinner', async () => {
     const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(jest.fn());
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
     mockTakePictureAsync.mockResolvedValue({
@@ -154,7 +172,23 @@ describe('App permissions flow', () => {
       uri: 'file:///tmp/card.jpg',
       width: 200
     });
-    mockExtractText.mockResolvedValue('John Doe\nAcme Corp\nSales Manager');
+
+    const leadId = '5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8';
+    Object.defineProperty(globalThis, 'crypto', {
+      configurable: true,
+      value: {
+        ...(globalThis.crypto ?? {}),
+        randomUUID: jest.fn().mockReturnValue(leadId)
+      }
+    });
+
+    let resolveInvoke: ((value: { parseStatus: 'parsed' | 'unparsed'; parsed: object }) => void) | null = null;
+    mockInvokeScanCard.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveInvoke = resolve;
+        })
+    );
 
     render(<App />);
 
@@ -164,14 +198,37 @@ describe('App permissions flow', () => {
       await Promise.resolve();
     });
 
-    expect(mockExtractText).toHaveBeenCalledWith('file:///tmp/card.jpg');
+    expect(screen.getByTestId('pipeline-spinner')).toBeTruthy();
+    expect(mockPrepareImage).toHaveBeenCalledWith('file:///tmp/card.jpg');
+    expect(mockExtractText).toHaveBeenCalledWith('file:///cache/prepared.jpg');
+    expect(mockUploadCardImage).toHaveBeenCalledWith('file:///cache/prepared.jpg', leadId);
+    expect(mockInvokeScanCard).toHaveBeenCalledWith({
+      imagePath: 'card-images/user-123/lead-456.jpg',
+      leadId,
+      rawText: 'John Doe\\nAcme Corp\\nSales Manager'
+    });
 
-    if (__DEV__) {
-      expect(alertSpy).toHaveBeenCalledWith('OCR text', 'John Doe\nAcme Corp\nSales Manager');
-    }
+    await act(async () => {
+      resolveInvoke?.({
+        parseStatus: 'parsed',
+        parsed: {
+          companyName: 'Acme Corp',
+          email: 'john@acme.com',
+          fullName: 'John Doe',
+          jobTitle: 'Sales Manager',
+          phoneNumber: '+1 555 111 2222'
+        }
+      });
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByTestId('pipeline-spinner')).toBeNull();
+    expect(screen.queryByTestId('capture-preview')).toBeNull();
+    expect(screen.getByTestId('camera-viewfinder')).toBeTruthy();
+    expect(alertSpy).not.toHaveBeenCalled();
   });
 
-  it('shows blurry retake alert when OCR throws BlurryImageError', async () => {
+  it('shows blurry retake alert and aborts upload/invoke when OCR throws BlurryImageError', async () => {
     const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(jest.fn());
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
     mockTakePictureAsync.mockResolvedValue({
@@ -190,5 +247,32 @@ describe('App permissions flow', () => {
     });
 
     expect(alertSpy).toHaveBeenCalledWith('Image too blurry, retake');
+    expect(mockUploadCardImage).not.toHaveBeenCalled();
+    expect(mockInvokeScanCard).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('pipeline-spinner')).toBeNull();
+    expect(screen.getByTestId('camera-viewfinder')).toBeTruthy();
+  });
+
+  it('shows a clear alert and returns to viewfinder when Edge Function invocation fails', async () => {
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(jest.fn());
+    mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+    mockTakePictureAsync.mockResolvedValue({
+      height: 100,
+      uri: 'file:///tmp/card.jpg',
+      width: 200
+    });
+    mockInvokeScanCard.mockRejectedValue(new ScanCardInvokeError('Network request failed'));
+
+    render(<App />);
+
+    fireEvent.press(screen.getByTestId('capture-button'));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(alertSpy).toHaveBeenCalledWith('Scan failed', 'Network request failed');
+    expect(screen.queryByTestId('pipeline-spinner')).toBeNull();
+    expect(screen.getByTestId('camera-viewfinder')).toBeTruthy();
   });
 });

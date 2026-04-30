@@ -1,43 +1,41 @@
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Image, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, StyleSheet, View } from 'react-native';
 
-import { SUPABASE_URL } from '@env';
 import { BlurryImageError, extractText } from './lib/ocr';
 import { CaptureButton } from './src/components/CaptureButton';
 import { DevImageUploadSurface } from './src/components/DevImageUploadSurface';
 import { PermissionDeniedScreen } from './src/components/PermissionDeniedScreen';
+import { prepareImage } from './src/lib/imagePrep';
+import { invokeScanCard, ScanCardInvokeError } from './src/lib/scanCard';
+import { uploadCardImage } from './src/lib/upload';
+
+function createUuid(): string {
+  const randomUuid = globalThis.crypto?.randomUUID;
+  if (typeof randomUuid === 'function') {
+    return randomUuid.call(globalThis.crypto);
+  }
+
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
+    const random = Math.floor(Math.random() * 16);
+    const value = char === 'x' ? random : (random & 0x3) | 0x8;
+    return value.toString(16);
+  });
+}
 
 export default function App() {
   const [permission, requestPermission] = useCameraPermissions();
   const [isCapturing, setIsCapturing] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
   const [previewUri, setPreviewUri] = useState<string | null>(null);
   const cameraRef = useRef<CameraView | null>(null);
   const captureLockRef = useRef(false);
-
-  useEffect(() => {
-    console.log('SUPABASE_URL', SUPABASE_URL);
-  }, []);
 
   useEffect(() => {
     if (!permission) {
       void requestPermission();
     }
   }, [permission, requestPermission]);
-
-  useEffect(() => {
-    if (!previewUri) {
-      return;
-    }
-
-    const dismissPreviewTimer = setTimeout(() => {
-      setPreviewUri(null);
-    }, 500);
-
-    return () => {
-      clearTimeout(dismissPreviewTimer);
-    };
-  }, [previewUri]);
 
   const handleTakePicture = useCallback(async (): Promise<string | null> => {
     if (captureLockRef.current) {
@@ -62,22 +60,36 @@ export default function App() {
 
   const handleCapture = useCallback((uri: string): void => {
     setPreviewUri(uri);
+    setIsProcessing(true);
 
     void (async () => {
       try {
-        const extractedText = await extractText(uri);
+        const leadId = createUuid();
+        const { cachePath } = await prepareImage(uri);
+        const rawText = await extractText(cachePath);
+        const imagePath = await uploadCardImage(cachePath, leadId);
 
-        if (__DEV__) {
-          Alert.alert('OCR text', extractedText);
-        }
+        await invokeScanCard({
+          imagePath,
+          leadId,
+          rawText
+        });
       } catch (error) {
         if (error instanceof BlurryImageError) {
-          setPreviewUri(null);
           Alert.alert('Image too blurry, retake');
           return;
         }
 
-        console.error('OCR extraction failed', error);
+        if (error instanceof ScanCardInvokeError) {
+          Alert.alert('Scan failed', error.message);
+          return;
+        }
+
+        console.error('Capture pipeline failed', error);
+        Alert.alert('Scan failed', 'Please try again');
+      } finally {
+        setIsProcessing(false);
+        setPreviewUri(null);
       }
     })();
   }, []);
@@ -93,7 +105,14 @@ export default function App() {
   return (
     <View style={styles.container}>
       {previewUri ? (
-        <Image source={{ uri: previewUri }} style={StyleSheet.absoluteFill} testID="capture-preview" />
+        <View style={StyleSheet.absoluteFill}>
+          <Image source={{ uri: previewUri }} style={StyleSheet.absoluteFill} testID="capture-preview" />
+          {isProcessing ? (
+            <View style={styles.processingOverlay}>
+              <ActivityIndicator color="#ffffff" size="large" testID="pipeline-spinner" />
+            </View>
+          ) : null}
+        </View>
       ) : (
         <>
           <CameraView
@@ -103,7 +122,7 @@ export default function App() {
             testID="camera-viewfinder"
           />
           {__DEV__ ? <DevImageUploadSurface /> : null}
-          <CaptureButton disabled={isCapturing} onCapture={handleCapture} takePicture={handleTakePicture} />
+          <CaptureButton disabled={isCapturing || isProcessing} onCapture={handleCapture} takePicture={handleTakePicture} />
         </>
       )}
     </View>
@@ -114,5 +133,11 @@ const styles = StyleSheet.create({
   container: {
     backgroundColor: '#000',
     flex: 1
+  },
+  processingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    justifyContent: 'center'
   }
 });
