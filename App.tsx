@@ -4,6 +4,7 @@ import { Image, StyleSheet, View } from 'react-native';
 
 import { SUPABASE_URL } from '@env';
 import { CaptureButton } from './src/components/CaptureButton';
+import { DevImageUploadSurface } from './src/components/DevImageUploadSurface';
 import { PermissionDeniedScreen } from './src/components/PermissionDeniedScreen';
 
 export default function App() {
@@ -82,6 +83,7 @@ export default function App() {
             style={StyleSheet.absoluteFill}
             testID="camera-viewfinder"
           />
+          {__DEV__ ? <DevImageUploadSurface /> : null}
           <CaptureButton disabled={isCapturing} onCapture={handleCapture} takePicture={handleTakePicture} />
         </>
       )}

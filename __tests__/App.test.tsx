@@ -7,6 +7,18 @@ import App from '../App';
 const mockUseCameraPermissions = jest.fn();
 const mockTakePictureAsync = jest.fn();
 
+jest.mock('expo-image-picker', () => ({
+  launchImageLibraryAsync: jest.fn()
+}));
+
+jest.mock('../src/lib/imagePrep', () => ({
+  prepareImage: jest.fn()
+}));
+
+jest.mock('../src/lib/upload', () => ({
+  uploadCardImage: jest.fn()
+}));
+
 jest.mock('expo-camera', () => {
   const React = require('react');
   const { View } = require('react-native');
@@ -54,6 +66,16 @@ describe('App permissions flow', () => {
     expect(screen.getByTestId('camera-viewfinder')).toBeTruthy();
     expect(screen.getByTestId('capture-button')).toBeTruthy();
     expect(screen.queryByText('Open Settings')).toBeNull();
+  });
+
+  it('renders dev upload test surface controls in __DEV__ builds', () => {
+    mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+
+    render(<App />);
+
+    expect(screen.getByText('Pick image')).toBeTruthy();
+    expect(screen.getByText('Prepare')).toBeTruthy();
+    expect(screen.getByText('Upload')).toBeTruthy();
   });
 
   it('captures once per tap burst, shows preview briefly, then returns to camera', async () => {
