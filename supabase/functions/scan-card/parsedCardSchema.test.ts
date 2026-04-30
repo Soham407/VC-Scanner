@@ -1,5 +1,6 @@
 import { assertEquals } from "jsr:@std/assert";
 import {
+  coerceParsedCard,
   getParseStatus,
   parsedCardSchema,
   type ParsedCard,
@@ -109,3 +110,13 @@ Deno.test("parsedCardSchema: empty object yields all null and unparsed", () => {
   assertEquals(parsed, EMPTY);
   assertEquals(getParseStatus(parsed), "unparsed");
 });
+
+Deno.test(
+  "parsedCardSchema: non-object payload still normalizes to all-null and unparsed",
+  () => {
+    const parsed = coerceParsedCard("not-an-object");
+
+    assertEquals(parsed, EMPTY);
+    assertEquals(getParseStatus(parsed), "unparsed");
+  },
+);
