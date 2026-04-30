@@ -120,3 +120,19 @@ Deno.test(
     assertEquals(getParseStatus(parsed), "unparsed");
   },
 );
+
+Deno.test(
+  "parsedCardSchema: non-coercible object values normalize to all-null and unparsed",
+  () => {
+    const parsed = coerceParsedCard({
+      fullName: { first: "Ada" },
+      jobTitle: true,
+      companyName: false,
+      email: { value: "ada@example.com" },
+      phoneNumber: { countryCode: "+1", local: "1234567" },
+    });
+
+    assertEquals(parsed, EMPTY);
+    assertEquals(getParseStatus(parsed), "unparsed");
+  },
+);
