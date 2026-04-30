@@ -7,7 +7,11 @@ import App from '../App';
 const mockUseCameraPermissions = jest.fn();
 
 jest.mock('expo-camera', () => ({
-  CameraView: () => null,
+  CameraView: (props: { testID?: string }) => {
+    const { View } = require('react-native');
+
+    return <View testID={props.testID} />;
+  },
   useCameraPermissions: () => mockUseCameraPermissions()
 }));
 
@@ -34,5 +38,14 @@ describe('App permissions flow', () => {
       screen.getByText(/camera access is required to scan business cards/i)
     ).toBeTruthy();
     expect(openSettingsSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders camera viewfinder when permission is granted', () => {
+    mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+
+    render(<App />);
+
+    expect(screen.getByTestId('camera-viewfinder')).toBeTruthy();
+    expect(screen.queryByText('Open Settings')).toBeNull();
   });
 });
