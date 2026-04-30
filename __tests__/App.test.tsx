@@ -1,41 +1,106 @@
 import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
-import { Alert, Linking } from 'react-native';
+import { Alert, Linking, View } from 'react-native';
 
 import App from '../App';
 import { BlurryImageError } from '../lib/ocr';
-import { ScanCardInvokeError } from '../src/lib/scanCard';
 
 const mockUseCameraPermissions = jest.fn();
 const mockTakePictureAsync = jest.fn();
 const mockExtractText = jest.fn();
 const mockPrepareImage = jest.fn();
-const mockUploadCardImage = jest.fn();
-const mockInvokeScanCard = jest.fn();
+const mockEnqueue = jest.fn();
+const mockRetry = jest.fn();
+const mockDrainOnce = jest.fn();
+const mockGarbageCollect = jest.fn();
+const mockBottomSheetPresent = jest.fn();
+
+let mockQueue: Array<{ id: string; status: 'uploading' | 'parsing' | 'failed'; imagePath: string; rawText: string; retryCount: number; error?: string }> = [];
+
+jest.mock('@react-native-async-storage/async-storage', () =>
+  require('@react-native-async-storage/async-storage/jest/async-storage-mock')
+);
 
 jest.mock('expo-image-picker', () => ({
   launchImageLibraryAsync: jest.fn()
 }));
 
+jest.mock('../src/components/DevImageUploadSurface', () => {
+  const React = require('react');
+  const { Text, View } = require('react-native');
+
+  return {
+    DevImageUploadSurface: () => (
+      <View>
+        <Text>Pick image</Text>
+        <Text>Prepare</Text>
+        <Text>Upload</Text>
+      </View>
+    )
+  };
+});
+
 jest.mock('../src/lib/imagePrep', () => ({
   prepareImage: (...args: unknown[]) => mockPrepareImage(...args)
 }));
 
-jest.mock('../src/lib/upload', () => ({
-  uploadCardImage: (...args: unknown[]) => mockUploadCardImage(...args)
-}));
-
-jest.mock('../src/lib/scanCard', () => {
-  class MockScanCardInvokeError extends Error {
-    constructor(message: string) {
+jest.mock('../lib/ocr', () => {
+  class MockBlurryImageError extends Error {
+    constructor(message = 'Image too blurry, retake') {
       super(message);
-      this.name = 'ScanCardInvokeError';
+      this.name = 'BlurryImageError';
     }
   }
 
   return {
-    ScanCardInvokeError: MockScanCardInvokeError,
-    invokeScanCard: (...args: unknown[]) => mockInvokeScanCard(...args)
+    BlurryImageError: MockBlurryImageError,
+    extractText: (...args: unknown[]) => mockExtractText(...args)
+  };
+});
+
+jest.mock('../store/scanner', () => ({
+  garbageCollectOrphanedQueueImages: (...args: unknown[]) => mockGarbageCollect(...args),
+  scannerQueueStore: {
+    getState: () => ({ queue: mockQueue })
+  },
+  useScannerQueueStore: (selector: (state: unknown) => unknown) => selector({
+    queue: mockQueue,
+    enqueue: mockEnqueue,
+    retry: mockRetry,
+    drainOnce: mockDrainOnce
+  })
+}));
+
+jest.mock('react-native-gesture-handler', () => {
+  const React = require('react');
+  const { View } = require('react-native');
+
+  return {
+    GestureHandlerRootView: ({ children }: { children: React.ReactNode }) => <View>{children}</View>
+  };
+});
+
+jest.mock('@gorhom/bottom-sheet', () => {
+  const React = require('react');
+  const { View } = require('react-native');
+
+  return {
+    BottomSheetModal: React.forwardRef((props: { children?: React.ReactNode }, ref: React.Ref<unknown>) => {
+      React.useImperativeHandle(ref, () => ({
+        present: mockBottomSheetPresent
+      }));
+
+      return <View>{props.children}</View>;
+    }),
+    BottomSheetModalProvider: ({ children }: { children: React.ReactNode }) => <View>{children}</View>,
+    BottomSheetView: ({ children }: { children: React.ReactNode }) => <View>{children}</View>,
+    BottomSheetFlatList: ({ data, renderItem, keyExtractor }: { data: unknown[]; renderItem: (params: { item: unknown; index: number }) => React.ReactNode; keyExtractor: (item: unknown) => string }) => (
+      <View>
+        {data.map((item, index) => (
+          <View key={keyExtractor(item)}>{renderItem({ item, index })}</View>
+        ))}
+      </View>
+    )
   };
 });
 
@@ -55,37 +120,14 @@ jest.mock('expo-camera', () => {
   };
 });
 
-jest.mock('../lib/ocr', () => {
-  class MockBlurryImageError extends Error {
-    constructor(message = 'Image too blurry, retake') {
-      super(message);
-      this.name = 'BlurryImageError';
-    }
-  }
-
-  return {
-    BlurryImageError: MockBlurryImageError,
-    extractText: (...args: unknown[]) => mockExtractText(...args)
-  };
-});
-
 describe('App permissions flow', () => {
   beforeEach(() => {
     jest.clearAllMocks();
-
-    mockPrepareImage.mockResolvedValue({ cachePath: 'file:///cache/prepared.jpg' });
-    mockExtractText.mockResolvedValue('John Doe\\nAcme Corp\\nSales Manager');
-    mockUploadCardImage.mockResolvedValue('card-images/user-123/lead-456.jpg');
-    mockInvokeScanCard.mockResolvedValue({
-      parseStatus: 'parsed',
-      parsed: {
-        companyName: 'Acme Corp',
-        email: 'john@acme.com',
-        fullName: 'John Doe',
-        jobTitle: 'Sales Manager',
-        phoneNumber: '+1 555 111 2222'
-      }
-    });
+    mockQueue = [];
+    mockGarbageCollect.mockResolvedValue(undefined);
+    mockDrainOnce.mockResolvedValue(undefined);
+    mockPrepareImage.mockResolvedValue({ cachePath: 'file:///cache/lead-5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg' });
+    mockExtractText.mockResolvedValue('John Doe\nAcme Corp\nSales Manager');
   });
 
   it('renders denied screen and opens settings when permission is denied', () => {
@@ -164,7 +206,7 @@ describe('App permissions flow', () => {
     expect(screen.getByTestId('capture-button').props.accessibilityState?.disabled).toBe(false);
   });
 
-  it('runs prepare -> OCR -> upload -> invoke sequentially with shared leadId and spinner', async () => {
+  it('runs prepare -> OCR -> enqueue and returns to viewfinder without spinner', async () => {
     const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(jest.fn());
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
     mockTakePictureAsync.mockResolvedValue({
@@ -182,14 +224,6 @@ describe('App permissions flow', () => {
       }
     });
 
-    let resolveInvoke: ((value: { parseStatus: 'parsed' | 'unparsed'; parsed: object }) => void) | null = null;
-    mockInvokeScanCard.mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          resolveInvoke = resolve;
-        })
-    );
-
     render(<App />);
 
     fireEvent.press(screen.getByTestId('capture-button'));
@@ -198,37 +232,20 @@ describe('App permissions flow', () => {
       await Promise.resolve();
     });
 
-    expect(screen.getByTestId('pipeline-spinner')).toBeTruthy();
-    expect(mockPrepareImage).toHaveBeenCalledWith('file:///tmp/card.jpg');
-    expect(mockExtractText).toHaveBeenCalledWith('file:///cache/prepared.jpg');
-    expect(mockUploadCardImage).toHaveBeenCalledWith('file:///cache/prepared.jpg', leadId);
-    expect(mockInvokeScanCard).toHaveBeenCalledWith({
-      imagePath: 'card-images/user-123/lead-456.jpg',
-      leadId,
-      rawText: 'John Doe\\nAcme Corp\\nSales Manager'
+    expect(mockPrepareImage).toHaveBeenCalledWith('file:///tmp/card.jpg', leadId);
+    expect(mockExtractText).toHaveBeenCalledWith('file:///cache/lead-5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg');
+    expect(mockEnqueue).toHaveBeenCalledWith({
+      id: leadId,
+      imagePath: 'file:///cache/lead-5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg',
+      rawText: 'John Doe\nAcme Corp\nSales Manager'
     });
-
-    await act(async () => {
-      resolveInvoke?.({
-        parseStatus: 'parsed',
-        parsed: {
-          companyName: 'Acme Corp',
-          email: 'john@acme.com',
-          fullName: 'John Doe',
-          jobTitle: 'Sales Manager',
-          phoneNumber: '+1 555 111 2222'
-        }
-      });
-      await Promise.resolve();
-    });
-
     expect(screen.queryByTestId('pipeline-spinner')).toBeNull();
     expect(screen.queryByTestId('capture-preview')).toBeNull();
     expect(screen.getByTestId('camera-viewfinder')).toBeTruthy();
     expect(alertSpy).not.toHaveBeenCalled();
   });
 
-  it('shows blurry retake alert and aborts upload/invoke when OCR throws BlurryImageError', async () => {
+  it('shows blurry retake alert and aborts enqueue when OCR throws BlurryImageError', async () => {
     const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(jest.fn());
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
     mockTakePictureAsync.mockResolvedValue({
@@ -247,32 +264,55 @@ describe('App permissions flow', () => {
     });
 
     expect(alertSpy).toHaveBeenCalledWith('Image too blurry, retake');
-    expect(mockUploadCardImage).not.toHaveBeenCalled();
-    expect(mockInvokeScanCard).not.toHaveBeenCalled();
-    expect(screen.queryByTestId('pipeline-spinner')).toBeNull();
+    expect(mockEnqueue).not.toHaveBeenCalled();
     expect(screen.getByTestId('camera-viewfinder')).toBeTruthy();
   });
 
-  it('shows a clear alert and returns to viewfinder when Edge Function invocation fails', async () => {
-    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(jest.fn());
+  it('shows corner pill count and opens retry sheet when tapped', () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
-    mockTakePictureAsync.mockResolvedValue({
-      height: 100,
-      uri: 'file:///tmp/card.jpg',
-      width: 200
-    });
-    mockInvokeScanCard.mockRejectedValue(new ScanCardInvokeError('Network request failed'));
+    mockQueue = [
+      {
+        id: 'lead-1',
+        status: 'uploading',
+        imagePath: 'file:///cache/lead-1.jpg',
+        rawText: 'text',
+        retryCount: 0
+      },
+      {
+        id: 'lead-2',
+        status: 'failed',
+        imagePath: 'file:///cache/lead-2.jpg',
+        rawText: 'text',
+        retryCount: 1,
+        error: 'Network failed'
+      }
+    ];
 
     render(<App />);
 
-    fireEvent.press(screen.getByTestId('capture-button'));
+    expect(screen.getByText('Saving 1...')).toBeTruthy();
+    fireEvent.press(screen.getByTestId('saving-pill'));
+    expect(mockBottomSheetPresent).toHaveBeenCalledTimes(1);
+  });
+
+  it('drains the queue in a worker effect when queue is non-empty', async () => {
+    mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+    mockQueue = [
+      {
+        id: 'lead-1',
+        status: 'uploading',
+        imagePath: 'file:///cache/lead-1.jpg',
+        rawText: 'text',
+        retryCount: 0
+      }
+    ];
+
+    render(<App />);
 
     await act(async () => {
       await Promise.resolve();
     });
 
-    expect(alertSpy).toHaveBeenCalledWith('Scan failed', 'Network request failed');
-    expect(screen.queryByTestId('pipeline-spinner')).toBeNull();
-    expect(screen.getByTestId('camera-viewfinder')).toBeTruthy();
+    expect(mockDrainOnce).toHaveBeenCalledTimes(1);
   });
 });

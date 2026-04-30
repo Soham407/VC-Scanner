@@ -1,14 +1,17 @@
+import { BottomSheetModal, BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Image, StyleSheet, View } from 'react-native';
+import { Alert, Image, StyleSheet, View } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { BlurryImageError, extractText } from './lib/ocr';
+import { garbageCollectOrphanedQueueImages, scannerQueueStore, useScannerQueueStore } from './store/scanner';
 import { CaptureButton } from './src/components/CaptureButton';
+import { CornerPill } from './src/components/CornerPill';
 import { DevImageUploadSurface } from './src/components/DevImageUploadSurface';
 import { PermissionDeniedScreen } from './src/components/PermissionDeniedScreen';
+import { QueueSheet } from './src/components/QueueSheet';
 import { prepareImage } from './src/lib/imagePrep';
-import { invokeScanCard, ScanCardInvokeError } from './src/lib/scanCard';
-import { uploadCardImage } from './src/lib/upload';
 
 function createUuid(): string {
   const randomUuid = globalThis.crypto?.randomUUID;
@@ -26,16 +29,70 @@ function createUuid(): string {
 export default function App() {
   const [permission, requestPermission] = useCameraPermissions();
   const [isCapturing, setIsCapturing] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
   const [previewUri, setPreviewUri] = useState<string | null>(null);
   const cameraRef = useRef<CameraView | null>(null);
   const captureLockRef = useRef(false);
+  const queueSheetRef = useRef<BottomSheetModal>(null);
+  const isDrainingRef = useRef(false);
+
+  const queue = useScannerQueueStore((state) => state.queue);
+  const enqueue = useScannerQueueStore((state) => state.enqueue);
+  const retry = useScannerQueueStore((state) => state.retry);
+  const drainOnce = useScannerQueueStore((state) => state.drainOnce);
+
+  const inFlightCount = queue.filter((item) => item.status !== 'failed').length;
 
   useEffect(() => {
     if (!permission) {
       void requestPermission();
     }
   }, [permission, requestPermission]);
+
+  useEffect(() => {
+    const runGc = async (): Promise<void> => {
+      try {
+        await garbageCollectOrphanedQueueImages(scannerQueueStore.getState().queue);
+      } catch (error) {
+        console.warn('Queue orphan GC failed', error);
+      }
+    };
+
+    const persistApi = (scannerQueueStore as typeof scannerQueueStore & {
+      persist?: {
+        hasHydrated?: () => boolean;
+        onFinishHydration?: (listener: () => void) => () => void;
+      };
+    }).persist;
+
+    if (persistApi?.hasHydrated?.()) {
+      void runGc();
+      return;
+    }
+
+    const unsubscribe = persistApi?.onFinishHydration?.(() => {
+      void runGc();
+    });
+
+    return () => {
+      unsubscribe?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (queue.length === 0 || isDrainingRef.current) {
+      return;
+    }
+
+    isDrainingRef.current = true;
+
+    void (async () => {
+      try {
+        await drainOnce();
+      } finally {
+        isDrainingRef.current = false;
+      }
+    })();
+  }, [queue, drainOnce]);
 
   const handleTakePicture = useCallback(async (): Promise<string | null> => {
     if (captureLockRef.current) {
@@ -60,18 +117,16 @@ export default function App() {
 
   const handleCapture = useCallback((uri: string): void => {
     setPreviewUri(uri);
-    setIsProcessing(true);
 
     void (async () => {
       try {
         const leadId = createUuid();
-        const { cachePath } = await prepareImage(uri);
+        const { cachePath } = await prepareImage(uri, leadId);
         const rawText = await extractText(cachePath);
-        const imagePath = await uploadCardImage(cachePath, leadId);
 
-        await invokeScanCard({
-          imagePath,
-          leadId,
+        enqueue({
+          id: leadId,
+          imagePath: cachePath,
           rawText
         });
       } catch (error) {
@@ -80,18 +135,16 @@ export default function App() {
           return;
         }
 
-        if (error instanceof ScanCardInvokeError) {
-          Alert.alert('Scan failed', error.message);
-          return;
-        }
-
         console.error('Capture pipeline failed', error);
         Alert.alert('Scan failed', 'Please try again');
       } finally {
-        setIsProcessing(false);
         setPreviewUri(null);
       }
     })();
+  }, [enqueue]);
+
+  const handlePillPress = useCallback(() => {
+    queueSheetRef.current?.present();
   }, []);
 
   if (!permission) {
@@ -103,29 +156,28 @@ export default function App() {
   }
 
   return (
-    <View style={styles.container}>
-      {previewUri ? (
-        <View style={StyleSheet.absoluteFill}>
-          <Image source={{ uri: previewUri }} style={StyleSheet.absoluteFill} testID="capture-preview" />
-          {isProcessing ? (
-            <View style={styles.processingOverlay}>
-              <ActivityIndicator color="#ffffff" size="large" testID="pipeline-spinner" />
-            </View>
-          ) : null}
+    <GestureHandlerRootView style={styles.container}>
+      <BottomSheetModalProvider>
+        <View style={styles.container}>
+          {previewUri ? (
+            <Image source={{ uri: previewUri }} style={StyleSheet.absoluteFill} testID="capture-preview" />
+          ) : (
+            <>
+              <CameraView
+                facing="back"
+                ref={cameraRef}
+                style={StyleSheet.absoluteFill}
+                testID="camera-viewfinder"
+              />
+              {__DEV__ ? <DevImageUploadSurface /> : null}
+              <CaptureButton disabled={isCapturing} onCapture={handleCapture} takePicture={handleTakePicture} />
+              <CornerPill count={inFlightCount} onPress={handlePillPress} />
+            </>
+          )}
+          <QueueSheet items={queue} onRetry={retry} ref={queueSheetRef} />
         </View>
-      ) : (
-        <>
-          <CameraView
-            facing="back"
-            ref={cameraRef}
-            style={StyleSheet.absoluteFill}
-            testID="camera-viewfinder"
-          />
-          {__DEV__ ? <DevImageUploadSurface /> : null}
-          <CaptureButton disabled={isCapturing || isProcessing} onCapture={handleCapture} takePicture={handleTakePicture} />
-        </>
-      )}
-    </View>
+      </BottomSheetModalProvider>
+    </GestureHandlerRootView>
   );
 }
 
@@ -133,11 +185,5 @@ const styles = StyleSheet.create({
   container: {
     backgroundColor: '#000',
     flex: 1
-  },
-  processingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.45)',
-    justifyContent: 'center'
   }
 });

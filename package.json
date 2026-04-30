@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@gorhom/bottom-sheet": "^5.2.13",
     "@react-native-async-storage/async-storage": "2.2.0",
     "@react-native-ml-kit/text-recognition": "^2.0.0",
     "@supabase/supabase-js": "^2.105.1",
@@ -21,7 +22,10 @@
     "expo-image-picker": "~17.0.11",
     "expo-status-bar": "~3.0.9",
     "react": "19.1.0",
-    "react-native": "0.81.5"
+    "react-native": "0.81.5",
+    "react-native-gesture-handler": "^2.31.1",
+    "react-native-reanimated": "^4.3.0",
+    "zustand": "^5.0.12"
   },
   "devDependencies": {
     "@testing-library/react-native": "^13.3.3",

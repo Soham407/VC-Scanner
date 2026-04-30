@@ -14,7 +14,7 @@ function createUuid(): string {
   });
 }
 
-export async function prepareImage(uri: string): Promise<{ cachePath: string }> {
+export async function prepareImage(uri: string, leadId?: string): Promise<{ cachePath: string }> {
   const cacheDirectory = FileSystem.cacheDirectory;
 
   if (!cacheDirectory) {
@@ -30,7 +30,8 @@ export async function prepareImage(uri: string): Promise<{ cachePath: string }> 
     }
   );
 
-  const cachePath = `${cacheDirectory}image-${createUuid()}.jpg`;
+  const cacheFileName = leadId ? `lead-${leadId}.jpg` : `image-${createUuid()}.jpg`;
+  const cachePath = `${cacheDirectory}${cacheFileName}`;
 
   await FileSystem.copyAsync({
     from: manipulatedImage.uri,
