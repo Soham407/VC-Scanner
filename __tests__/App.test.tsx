@@ -15,6 +15,7 @@ const mockRetry = jest.fn();
 const mockDrainOnce = jest.fn();
 const mockGarbageCollect = jest.fn();
 const mockBottomSheetPresent = jest.fn();
+const mockUseNetInfo = jest.fn();
 
 let mockQueue: Array<{ id: string; status: 'uploading' | 'parsing' | 'failed'; imagePath: string; rawText: string; retryCount: number; error?: string }> = [];
 
@@ -26,6 +27,24 @@ jest.mock('expo-image-picker', () => ({
   launchImageLibraryAsync: jest.fn()
 }));
 
+jest.mock('@react-native-community/netinfo', () => ({
+  useNetInfo: () => mockUseNetInfo()
+}));
+
+jest.mock('../src/components/DevImageUploadSurface', () => {
+  const React = require('react');
+  const { Text, View } = require('react-native');
+
+  return {
+    DevImageUploadSurface: () => (
+      <View>
+        <Text>Pick image</Text>
+        <Text>Prepare</Text>
+        <Text>Upload</Text>
+      </View>
+    )
+  };
+});
 jest.mock('../src/lib/imagePrep', () => ({
   prepareImage: (...args: unknown[]) => mockPrepareImage(...args)
 }));
@@ -114,6 +133,7 @@ describe('App permissions flow', () => {
       configurable: true,
       value: true
     });
+    mockUseNetInfo.mockReturnValue({ isConnected: true });
     mockGarbageCollect.mockResolvedValue(undefined);
     mockDrainOnce.mockResolvedValue(undefined);
     mockPrepareImage.mockResolvedValue({ cachePath: 'file:///cache/lead-5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg' });
@@ -324,7 +344,7 @@ describe('App permissions flow', () => {
     expect(mockBottomSheetPresent).toHaveBeenCalledTimes(1);
   });
 
-  it('drains the queue in a worker effect when queue is non-empty', async () => {
+  it('drains the queue in a worker effect when queue is non-empty and online', async () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
     mockQueue = [
       {
@@ -343,5 +363,27 @@ describe('App permissions flow', () => {
     });
 
     expect(mockDrainOnce).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not drain the queue in a worker effect when offline', async () => {
+    mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+    mockUseNetInfo.mockReturnValue({ isConnected: false });
+    mockQueue = [
+      {
+        id: 'lead-1',
+        status: 'uploading',
+        imagePath: 'file:///cache/lead-1.jpg',
+        rawText: 'text',
+        retryCount: 0
+      }
+    ];
+
+    render(<App />);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockDrainOnce).not.toHaveBeenCalled();
   });
 });

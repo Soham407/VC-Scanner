@@ -33,10 +33,50 @@ type ScanCardFunctionFailure = {
 };
 
 export class ScanCardInvokeError extends Error {
-  constructor(message: string) {
+  status?: number;
+
+  constructor(message: string, status?: number) {
     super(message);
     this.name = 'ScanCardInvokeError';
+    this.status = status;
   }
+}
+
+function getInvokeErrorStatus(error: unknown): number | undefined {
+  if (typeof error !== 'object' || error === null) {
+    return undefined;
+  }
+
+  const errorObject = error as {
+    status?: unknown;
+    context?: {
+      status?: unknown;
+      statusCode?: unknown;
+    };
+    statusCode?: unknown;
+  };
+
+  const candidates = [
+    errorObject.status,
+    errorObject.statusCode,
+    errorObject.context?.status,
+    errorObject.context?.statusCode
+  ];
+
+  for (const candidate of candidates) {
+    if (typeof candidate === 'number' && Number.isFinite(candidate)) {
+      return candidate;
+    }
+
+    if (typeof candidate === 'string') {
+      const parsed = Number.parseInt(candidate, 10);
+      if (Number.isFinite(parsed)) {
+        return parsed;
+      }
+    }
+  }
+
+  return undefined;
 }
 
 export async function invokeScanCard(params: InvokeScanCardParams): Promise<InvokeScanCardResponse> {
@@ -52,7 +92,7 @@ export async function invokeScanCard(params: InvokeScanCardParams): Promise<Invo
   );
 
   if (error) {
-    throw new ScanCardInvokeError(error.message);
+    throw new ScanCardInvokeError(error.message, getInvokeErrorStatus(error));
   }
 
   if (!data || !('ok' in data) || data.ok !== true) {
