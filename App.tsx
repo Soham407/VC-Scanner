@@ -2,6 +2,7 @@ import { BottomSheetModal, BottomSheetModalProvider } from '@gorhom/bottom-sheet
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Image, StyleSheet, View } from 'react-native';
+import * as NetInfo from '@react-native-community/netinfo';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { BlurryImageError, extractText } from './lib/ocr';
@@ -34,6 +35,7 @@ export default function App() {
   const captureLockRef = useRef(false);
   const queueSheetRef = useRef<BottomSheetModal>(null);
   const isDrainingRef = useRef(false);
+  const isConnected = NetInfo.useNetInfo().isConnected;
 
   const queue = useScannerQueueStore((state) => state.queue);
   const enqueue = useScannerQueueStore((state) => state.enqueue);
@@ -79,7 +81,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (queue.length === 0 || isDrainingRef.current) {
+    if (queue.length === 0 || isConnected === false || isDrainingRef.current) {
       return;
     }
 
@@ -92,7 +94,7 @@ export default function App() {
         isDrainingRef.current = false;
       }
     })();
-  }, [queue, drainOnce]);
+  }, [queue, drainOnce, isConnected]);
 
   const handleTakePicture = useCallback(async (): Promise<string | null> => {
     if (captureLockRef.current) {
