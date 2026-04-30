@@ -1,11 +1,13 @@
 import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
-import { Linking } from 'react-native';
+import { Alert, Linking } from 'react-native';
 
 import App from '../App';
+import { BlurryImageError } from '../lib/ocr';
 
 const mockUseCameraPermissions = jest.fn();
 const mockTakePictureAsync = jest.fn();
+const mockExtractText = jest.fn();
 
 jest.mock('expo-camera', () => {
   const React = require('react');
@@ -20,6 +22,20 @@ jest.mock('expo-camera', () => {
       return <View testID={props.testID} />;
     }),
     useCameraPermissions: () => mockUseCameraPermissions()
+  };
+});
+
+jest.mock('../lib/ocr', () => {
+  class MockBlurryImageError extends Error {
+    constructor(message = 'Image too blurry, retake') {
+      super(message);
+      this.name = 'BlurryImageError';
+    }
+  }
+
+  return {
+    BlurryImageError: MockBlurryImageError,
+    extractText: (...args: unknown[]) => mockExtractText(...args)
   };
 });
 
@@ -106,5 +122,51 @@ describe('App permissions flow', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  it('shows OCR text in a dev-only alert after capture', async () => {
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(jest.fn());
+    mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+    mockTakePictureAsync.mockResolvedValue({
+      height: 100,
+      uri: 'file:///tmp/card.jpg',
+      width: 200
+    });
+    mockExtractText.mockResolvedValue('John Doe\nAcme Corp\nSales Manager');
+
+    render(<App />);
+
+    fireEvent.press(screen.getByTestId('capture-button'));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockExtractText).toHaveBeenCalledWith('file:///tmp/card.jpg');
+
+    if (__DEV__) {
+      expect(alertSpy).toHaveBeenCalledWith('OCR text', 'John Doe\nAcme Corp\nSales Manager');
+    }
+  });
+
+  it('shows blurry retake alert when OCR throws BlurryImageError', async () => {
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(jest.fn());
+    mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+    mockTakePictureAsync.mockResolvedValue({
+      height: 100,
+      uri: 'file:///tmp/blank.jpg',
+      width: 200
+    });
+    mockExtractText.mockRejectedValue(new BlurryImageError());
+
+    render(<App />);
+
+    fireEvent.press(screen.getByTestId('capture-button'));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(alertSpy).toHaveBeenCalledWith('Image too blurry, retake');
   });
 });

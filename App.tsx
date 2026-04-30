@@ -1,8 +1,9 @@
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Image, StyleSheet, View } from 'react-native';
+import { Alert, Image, StyleSheet, View } from 'react-native';
 
 import { SUPABASE_URL } from '@env';
+import { BlurryImageError, extractText } from './lib/ocr';
 import { CaptureButton } from './src/components/CaptureButton';
 import { PermissionDeniedScreen } from './src/components/PermissionDeniedScreen';
 
@@ -60,6 +61,24 @@ export default function App() {
 
   const handleCapture = useCallback((uri: string): void => {
     setPreviewUri(uri);
+
+    void (async () => {
+      try {
+        const extractedText = await extractText(uri);
+
+        if (__DEV__) {
+          Alert.alert('OCR text', extractedText);
+        }
+      } catch (error) {
+        if (error instanceof BlurryImageError) {
+          setPreviewUri(null);
+          Alert.alert('Image too blurry, retake');
+          return;
+        }
+
+        console.error('OCR extraction failed', error);
+      }
+    })();
   }, []);
 
   if (!permission) {

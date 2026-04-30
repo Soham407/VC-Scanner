@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@react-native-ml-kit/text-recognition": "^2.0.0",
     "expo": "~54.0.33",
     "expo-camera": "~17.0.10",
     "expo-status-bar": "~3.0.9",
