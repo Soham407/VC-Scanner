@@ -1,0 +1,22 @@
+# Secrets
+.env
+.env.local
+
+# macOS
+.DS_Store
+
+# Node
+node_modules/
+
+# Build / cache
+*.log
+.expo/
+dist/
+build/
+
+# Sandcastle artifacts (worktrees, logs)
+.sandcastle/
+
+# Supabase local stack scratch (the .gitignore inside supabase/ also handles these)
+supabase/.branches/
+supabase/.temp/
