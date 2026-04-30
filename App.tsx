@@ -1,14 +1,14 @@
 import { BottomSheetModal, BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import { launchImageLibraryAsync } from 'expo-image-picker';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Image, StyleSheet, View } from 'react-native';
+import { Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { BlurryImageError, extractText } from './lib/ocr';
 import { garbageCollectOrphanedQueueImages, scannerQueueStore, useScannerQueueStore } from './store/scanner';
 import { CaptureButton } from './src/components/CaptureButton';
 import { CornerPill } from './src/components/CornerPill';
-import { DevImageUploadSurface } from './src/components/DevImageUploadSurface';
 import { PermissionDeniedScreen } from './src/components/PermissionDeniedScreen';
 import { QueueSheet } from './src/components/QueueSheet';
 import { prepareImage } from './src/lib/imagePrep';
@@ -147,6 +147,20 @@ export default function App() {
     queueSheetRef.current?.present();
   }, []);
 
+  const handlePickFromGallery = useCallback(() => {
+    void (async () => {
+      const pickedImageResult = await launchImageLibraryAsync({
+        quality: 1
+      });
+
+      if (pickedImageResult.canceled || pickedImageResult.assets.length === 0) {
+        return;
+      }
+
+      handleCapture(pickedImageResult.assets[0].uri);
+    })();
+  }, [handleCapture]);
+
   if (!permission) {
     return <View style={styles.container} />;
   }
@@ -169,7 +183,16 @@ export default function App() {
                 style={StyleSheet.absoluteFill}
                 testID="camera-viewfinder"
               />
-              {__DEV__ ? <DevImageUploadSurface /> : null}
+              {__DEV__ ? (
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={handlePickFromGallery}
+                  style={styles.galleryPickerButton}
+                  testID="pick-from-gallery-button"
+                >
+                  <Text style={styles.galleryPickerButtonText}>Pick from gallery</Text>
+                </Pressable>
+              ) : null}
               <CaptureButton disabled={isCapturing} onCapture={handleCapture} takePicture={handleTakePicture} />
               <CornerPill count={inFlightCount} onPress={handlePillPress} />
             </>
@@ -185,5 +208,20 @@ const styles = StyleSheet.create({
   container: {
     backgroundColor: '#000',
     flex: 1
+  },
+  galleryPickerButton: {
+    backgroundColor: 'rgba(17, 24, 39, 0.85)',
+    borderRadius: 8,
+    left: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    position: 'absolute',
+    top: 48,
+    zIndex: 5
+  },
+  galleryPickerButtonText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600'
   }
 });

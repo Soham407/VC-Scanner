@@ -14,7 +14,8 @@
     },
     "ios": {
       "infoPlist": {
-        "NSCameraUsageDescription": "VC Scanner needs camera access to scan business cards."
+        "NSCameraUsageDescription": "VC Scanner needs camera access to scan business cards.",
+        "NSPhotoLibraryUsageDescription": "VC Scanner needs photo library access to pick business card images in development."
       },
       "supportsTablet": true,
       "bundleIdentifier": "com.anonymous.vcscanner"

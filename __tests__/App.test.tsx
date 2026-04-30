@@ -1,5 +1,6 @@
 import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { Alert, Linking, View } from 'react-native';
 
 import App from '../App';
@@ -24,21 +25,6 @@ jest.mock('@react-native-async-storage/async-storage', () =>
 jest.mock('expo-image-picker', () => ({
   launchImageLibraryAsync: jest.fn()
 }));
-
-jest.mock('../src/components/DevImageUploadSurface', () => {
-  const React = require('react');
-  const { Text, View } = require('react-native');
-
-  return {
-    DevImageUploadSurface: () => (
-      <View>
-        <Text>Pick image</Text>
-        <Text>Prepare</Text>
-        <Text>Upload</Text>
-      </View>
-    )
-  };
-});
 
 jest.mock('../src/lib/imagePrep', () => ({
   prepareImage: (...args: unknown[]) => mockPrepareImage(...args)
@@ -124,6 +110,10 @@ describe('App permissions flow', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockQueue = [];
+    Object.defineProperty(globalThis, '__DEV__', {
+      configurable: true,
+      value: true
+    });
     mockGarbageCollect.mockResolvedValue(undefined);
     mockDrainOnce.mockResolvedValue(undefined);
     mockPrepareImage.mockResolvedValue({ cachePath: 'file:///cache/lead-5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg' });
@@ -158,14 +148,53 @@ describe('App permissions flow', () => {
     expect(screen.queryByText('Open Settings')).toBeNull();
   });
 
-  it('renders dev upload test surface controls in __DEV__ builds', () => {
+  it('renders a dev gallery picker button and routes selected image through capture pipeline', async () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+    (ImagePicker.launchImageLibraryAsync as jest.Mock).mockResolvedValue({
+      assets: [{ uri: 'file:///tmp/gallery-card.jpg' }],
+      canceled: false
+    });
+
+    const leadId = '5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8';
+    Object.defineProperty(globalThis, 'crypto', {
+      configurable: true,
+      value: {
+        ...(globalThis.crypto ?? {}),
+        randomUUID: jest.fn().mockReturnValue(leadId)
+      }
+    });
 
     render(<App />);
 
-    expect(screen.getByText('Pick image')).toBeTruthy();
-    expect(screen.getByText('Prepare')).toBeTruthy();
-    expect(screen.getByText('Upload')).toBeTruthy();
+    fireEvent.press(screen.getByText('Pick from gallery'));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(ImagePicker.launchImageLibraryAsync).toHaveBeenCalledWith({
+      quality: 1
+    });
+    expect(mockPrepareImage).toHaveBeenCalledWith('file:///tmp/gallery-card.jpg', leadId);
+    expect(mockExtractText).toHaveBeenCalledWith('file:///cache/lead-5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg');
+    expect(mockEnqueue).toHaveBeenCalledWith({
+      id: leadId,
+      imagePath: 'file:///cache/lead-5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg',
+      rawText: 'John Doe\nAcme Corp\nSales Manager'
+    });
+  });
+
+  it('does not render pick from gallery button in non-dev builds', () => {
+    mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+    Object.defineProperty(globalThis, '__DEV__', {
+      configurable: true,
+      value: false
+    });
+
+    render(<App />);
+
+    expect(screen.queryByText('Pick from gallery')).toBeNull();
+    expect(screen.queryByTestId('pick-from-gallery-button')).toBeNull();
   });
 
   it('captures once per tap burst while the capture call is in flight', async () => {
