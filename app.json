@@ -1,0 +1,47 @@
+{
+  "expo": {
+    "name": "VC Scanner",
+    "slug": "vc-scanner",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "infoPlist": {
+        "NSCameraUsageDescription": "VC Scanner needs camera access to scan business cards."
+      },
+      "supportsTablet": true,
+      "bundleIdentifier": "com.anonymous.vcscanner"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ],
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+      "package": "com.anonymous.vcscanner"
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "VC Scanner needs camera access to scan business cards."
+        }
+      ]
+    ],
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}
