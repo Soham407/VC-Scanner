@@ -7,6 +7,7 @@ import App from '../App';
 import { BlurryImageError } from '../lib/ocr';
 
 const mockUseCameraPermissions = jest.fn();
+const mockBootstrapAnonymousSession = jest.fn().mockResolvedValue(undefined);
 const mockTakePictureAsync = jest.fn();
 const mockExtractText = jest.fn();
 const mockPrepareImage = jest.fn();
@@ -47,6 +48,10 @@ jest.mock('../src/components/DevImageUploadSurface', () => {
 });
 jest.mock('../src/lib/imagePrep', () => ({
   prepareImage: (...args: unknown[]) => mockPrepareImage(...args)
+}));
+
+jest.mock('../src/lib/supabase', () => ({
+  bootstrapAnonymousSession: (...args: unknown[]) => mockBootstrapAnonymousSession(...args)
 }));
 
 jest.mock('../lib/ocr', () => {
@@ -138,6 +143,18 @@ describe('App permissions flow', () => {
     mockDrainOnce.mockResolvedValue(undefined);
     mockPrepareImage.mockResolvedValue({ cachePath: 'file:///cache/lead-5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg' });
     mockExtractText.mockResolvedValue('John Doe\nAcme Corp\nSales Manager');
+  });
+
+  it('bootstraps an anonymous Supabase session on mount', async () => {
+    mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+
+    render(<App />);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockBootstrapAnonymousSession).toHaveBeenCalledTimes(1);
   });
 
   it('renders denied screen and opens settings when permission is denied', () => {

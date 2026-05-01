@@ -7,6 +7,7 @@ import { Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { BlurryImageError, extractText } from './lib/ocr';
+import { bootstrapAnonymousSession } from './src/lib/supabase';
 import { garbageCollectOrphanedQueueImages, scannerQueueStore, useScannerQueueStore } from './store/scanner';
 import { CaptureButton } from './src/components/CaptureButton';
 import { CornerPill } from './src/components/CornerPill';
@@ -43,6 +44,12 @@ export default function App() {
   const drainOnce = useScannerQueueStore((state) => state.drainOnce);
 
   const inFlightCount = queue.filter((item) => item.status !== 'failed').length;
+
+  useEffect(() => {
+    void bootstrapAnonymousSession().catch((error) => {
+      console.warn('Supabase anonymous bootstrap failed', error);
+    });
+  }, []);
 
   useEffect(() => {
     if (!permission) {
