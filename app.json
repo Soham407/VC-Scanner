@@ -2,10 +2,11 @@
   "expo": {
     "name": "VC Scanner",
     "slug": "vc-scanner",
+    "scheme": "vcscanner",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash-icon.png",
@@ -39,7 +40,9 @@
         {
           "cameraPermission": "VC Scanner needs camera access to scan business cards."
         }
-      ]
+      ],
+      "expo-asset",
+      "expo-web-browser"
     ],
     "web": {
       "favicon": "./assets/favicon.png"

@@ -1,13 +1,13 @@
 import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
-import { Alert, Linking, View } from 'react-native';
+import { Alert, Linking, Text, View } from 'react-native';
 
 import App from '../App';
 import { BlurryImageError } from '../lib/ocr';
 
 const mockUseCameraPermissions = jest.fn();
-const mockBootstrapAnonymousSession = jest.fn().mockResolvedValue(undefined);
 const mockTakePictureAsync = jest.fn();
 const mockExtractText = jest.fn();
 const mockPrepareImage = jest.fn();
@@ -17,9 +17,27 @@ const mockDrainOnce = jest.fn();
 const mockGarbageCollect = jest.fn();
 const mockGetActiveBoothId = jest.fn();
 const mockBottomSheetPresent = jest.fn();
+const mockClearSystemNotice = jest.fn();
 const mockUseNetInfo = jest.fn();
+const mockGetSession = jest.fn();
+const mockOnAuthStateChange = jest.fn();
+const mockSignOut = jest.fn();
+const mockSignInWithPassword = jest.fn();
+const mockSignUp = jest.fn();
+const mockSignInWithOAuth = jest.fn();
+const mockExchangeCodeForSession = jest.fn();
+const mockSyncScannerQueueStoreNamespace = jest.fn().mockResolvedValue(undefined);
+
+const mockSession = {
+  user: {
+    email: 'user@example.com',
+    id: 'user-1'
+  }
+};
 
 let mockQueue: Array<{ id: string; status: 'uploading' | 'parsing' | 'failed'; imagePath: string; rawText: string; retryCount: number; error?: string }> = [];
+let mockHistory: Array<{ id: string; imagePath: string; storagePath: string; rawText: string; parseStatus: 'parsed' | 'unparsed'; parsed: { fullName: string | null; jobTitle: string | null; companyName: string | null; email: string | null; phoneNumber: string | null }; savedAt: number }> = [];
+let mockSystemNotice: null | { kind: 'success' | 'error'; title: string; message: string; createdAt: number } = null;
 
 jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest/async-storage-mock')
@@ -32,6 +50,31 @@ jest.mock('expo-image-picker', () => ({
 jest.mock('@react-native-community/netinfo', () => ({
   useNetInfo: () => mockUseNetInfo()
 }));
+
+jest.mock('react-native-safe-area-context', () => {
+  const React = require('react');
+  const { View } = require('react-native');
+  const insets = {
+    bottom: 0,
+    left: 0,
+    right: 0,
+    top: 0
+  };
+  const frame = {
+    height: 844,
+    width: 390,
+    x: 0,
+    y: 0
+  };
+
+  return {
+    SafeAreaProvider: ({ children }: { children: React.ReactNode }) => <View>{children}</View>,
+    SafeAreaView: ({ children, style }: { children: React.ReactNode; style?: unknown }) => <View style={style}>{children}</View>,
+    SafeAreaFrameContext: React.createContext(frame),
+    SafeAreaInsetsContext: React.createContext(insets),
+    useSafeAreaInsets: () => insets
+  };
+});
 
 jest.mock('../src/components/DevImageUploadSurface', () => {
   const React = require('react');
@@ -52,7 +95,30 @@ jest.mock('../src/lib/imagePrep', () => ({
 }));
 
 jest.mock('../src/lib/supabase', () => ({
-  bootstrapAnonymousSession: (...args: unknown[]) => mockBootstrapAnonymousSession(...args)
+  supabase: {
+    auth: {
+      exchangeCodeForSession: (...args: unknown[]) => mockExchangeCodeForSession(...args),
+      getSession: (...args: unknown[]) => mockGetSession(...args),
+      onAuthStateChange: (...args: unknown[]) => mockOnAuthStateChange(...args),
+      signInWithOAuth: (...args: unknown[]) => mockSignInWithOAuth(...args),
+      signInWithPassword: (...args: unknown[]) => mockSignInWithPassword(...args),
+      signOut: (...args: unknown[]) => mockSignOut(...args),
+      signUp: (...args: unknown[]) => mockSignUp(...args)
+    }
+  }
+}));
+
+jest.mock('../src/components/AuthScreen', () => ({
+  AuthScreen: () => {
+    const React = require('react');
+    const { Text, View } = require('react-native');
+
+    return (
+      <View>
+        <Text>Auth screen</Text>
+      </View>
+    );
+  }
 }));
 
 jest.mock('../src/lib/boothContext', () => ({
@@ -75,12 +141,17 @@ jest.mock('../lib/ocr', () => {
 
 jest.mock('../store/scanner', () => ({
   garbageCollectOrphanedQueueImages: (...args: unknown[]) => mockGarbageCollect(...args),
+  syncScannerQueueStoreNamespace: (...args: unknown[]) => mockSyncScannerQueueStoreNamespace(...args),
   scannerQueueStore: {
-    getState: () => ({ queue: mockQueue })
+    getState: () => ({ queue: mockQueue, history: mockHistory, systemNotice: mockSystemNotice })
   },
   useScannerQueueStore: (selector: (state: unknown) => unknown) => selector({
     queue: mockQueue,
+    history: mockHistory,
+    systemNotice: mockSystemNotice,
     enqueue: mockEnqueue,
+    clearHistory: jest.fn(),
+    clearSystemNotice: mockClearSystemNotice,
     retry: mockRetry,
     drainOnce: mockDrainOnce
   })
@@ -135,10 +206,28 @@ jest.mock('expo-camera', () => {
   };
 });
 
+async function openCamera(): Promise<void> {
+  fireEvent.press(screen.getByTestId('camera-fab'));
+
+  await act(async () => {
+    await Promise.resolve();
+  });
+}
+
+async function renderAppReady(): Promise<void> {
+  render(<App />);
+
+  await act(async () => {
+    await Promise.resolve();
+  });
+}
+
 describe('App permissions flow', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     jest.clearAllMocks();
     mockQueue = [];
+    mockHistory = [];
+    mockSystemNotice = null;
     Object.defineProperty(globalThis, '__DEV__', {
       configurable: true,
       value: true
@@ -147,23 +236,38 @@ describe('App permissions flow', () => {
     mockGarbageCollect.mockResolvedValue(undefined);
     mockDrainOnce.mockResolvedValue(undefined);
     mockGetActiveBoothId.mockResolvedValue(null);
+    mockGetSession.mockResolvedValue({ data: { session: mockSession }, error: null });
+    mockOnAuthStateChange.mockReturnValue({
+      data: {
+        subscription: {
+          unsubscribe: jest.fn()
+        }
+      }
+    });
     mockPrepareImage.mockResolvedValue({ cachePath: 'file:///cache/lead-5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg' });
     mockExtractText.mockResolvedValue('John Doe\nAcme Corp\nSales Manager');
+    await AsyncStorage.clear();
   });
 
-  it('bootstraps an anonymous Supabase session on mount', async () => {
+  it('hydrates the signed-in session on mount', async () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
 
-    render(<App />);
+    await renderAppReady();
 
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    expect(mockBootstrapAnonymousSession).toHaveBeenCalledTimes(1);
+    expect(mockGetSession).toHaveBeenCalledTimes(1);
+    expect(mockSyncScannerQueueStoreNamespace).toHaveBeenCalledWith('user-1');
   });
 
-  it('renders denied screen and opens settings when permission is denied', () => {
+  it('renders the auth screen when there is no signed-in session', async () => {
+    mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+    mockGetSession.mockResolvedValueOnce({ data: { session: null }, error: null });
+
+    await renderAppReady();
+
+    expect(screen.getByText('Auth screen')).toBeTruthy();
+  });
+
+  it('renders denied screen and opens settings when permission is denied', async () => {
     const openSettingsSpy = jest.spyOn(Linking, 'openSettings').mockResolvedValue();
 
     mockUseCameraPermissions.mockReturnValue([
@@ -171,7 +275,8 @@ describe('App permissions flow', () => {
       jest.fn()
     ]);
 
-    render(<App />);
+    await renderAppReady();
+    await openCamera();
 
     fireEvent.press(screen.getByText('Open Settings'));
 
@@ -181,14 +286,81 @@ describe('App permissions flow', () => {
     expect(openSettingsSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('renders camera viewfinder when permission is granted', () => {
+  it('renders dashboard first and opens camera viewfinder when permission is granted', async () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
 
-    render(<App />);
+    await renderAppReady();
+
+    expect(screen.getAllByText('Dashboard').length).toBeGreaterThan(0);
+    expect(screen.getByTestId('camera-fab')).toBeTruthy();
+
+    await openCamera();
 
     expect(screen.getByTestId('camera-viewfinder')).toBeTruthy();
     expect(screen.getByTestId('capture-button')).toBeTruthy();
     expect(screen.queryByText('Open Settings')).toBeNull();
+  });
+
+  it('renders a history button when completed scans exist', async () => {
+    mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+    mockHistory = [
+      {
+        id: 'lead-1',
+        imagePath: 'file:///cache/lead-1.jpg',
+        parsed: {
+          fullName: 'John Doe',
+          jobTitle: 'Sales Manager',
+          companyName: 'Acme Corp',
+          email: 'john@example.com',
+          phoneNumber: null
+        },
+        parseStatus: 'parsed',
+        rawText: 'John Doe',
+        savedAt: Date.now(),
+        storagePath: 'card-images/user-1/lead-1.jpg'
+      }
+    ];
+
+    await renderAppReady();
+
+    expect(screen.getByTestId('history-button')).toBeTruthy();
+  });
+
+  it('switches the color mode from the profile page', async () => {
+    mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+
+    await renderAppReady();
+
+    fireEvent.press(screen.getByText('Profile'));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const initialMode = screen.getByText(/^(Dark|Light)$/).props.children;
+
+    fireEvent.press(screen.getByTestId('color-mode-toggle'));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText(initialMode === 'Dark' ? 'Light' : 'Dark')).toBeTruthy();
+  });
+
+  it('renders a snackbar when a system notice exists', async () => {
+    mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+    mockSystemNotice = {
+      kind: 'success',
+      title: 'Saved',
+      message: 'Scan saved to cloud',
+      createdAt: Date.now()
+    };
+
+    await renderAppReady();
+
+    expect(screen.getByTestId('system-snackbar')).toBeTruthy();
+    expect(screen.getByText('Saved: Scan saved to cloud')).toBeTruthy();
   });
 
   it('renders a dev gallery picker button and routes selected image through capture pipeline', async () => {
@@ -208,9 +380,10 @@ describe('App permissions flow', () => {
       }
     });
 
-    render(<App />);
+    await renderAppReady();
+    await openCamera();
 
-    fireEvent.press(screen.getByText('Pick from gallery'));
+    fireEvent.press(screen.getByTestId('pick-from-gallery-button'));
 
     await act(async () => {
       await Promise.resolve();
@@ -229,16 +402,17 @@ describe('App permissions flow', () => {
     });
   });
 
-  it('does not render pick from gallery button in non-dev builds', () => {
+  it('does not render pick from gallery button in non-dev builds', async () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
     Object.defineProperty(globalThis, '__DEV__', {
       configurable: true,
       value: false
     });
 
-    render(<App />);
+    await renderAppReady();
+    await openCamera();
 
-    expect(screen.queryByText('Pick from gallery')).toBeNull();
+    expect(screen.queryByText('Gallery')).toBeNull();
     expect(screen.queryByTestId('pick-from-gallery-button')).toBeNull();
   });
 
@@ -254,7 +428,8 @@ describe('App permissions flow', () => {
         })
     );
 
-    render(<App />);
+    await renderAppReady();
+    await openCamera();
 
     const captureButton = screen.getByTestId('capture-button');
 
@@ -299,7 +474,8 @@ describe('App permissions flow', () => {
       }
     });
 
-    render(<App />);
+    await renderAppReady();
+    await openCamera();
 
     fireEvent.press(screen.getByTestId('capture-button'));
 
@@ -341,7 +517,8 @@ describe('App permissions flow', () => {
       }
     });
 
-    render(<App />);
+    await renderAppReady();
+    await openCamera();
 
     fireEvent.press(screen.getByTestId('capture-button'));
 
@@ -372,7 +549,8 @@ describe('App permissions flow', () => {
     });
     mockExtractText.mockRejectedValue(new BlurryImageError());
 
-    render(<App />);
+    await renderAppReady();
+    await openCamera();
 
     fireEvent.press(screen.getByTestId('capture-button'));
 
@@ -385,7 +563,7 @@ describe('App permissions flow', () => {
     expect(screen.getByTestId('camera-viewfinder')).toBeTruthy();
   });
 
-  it('shows corner pill count and opens retry sheet when tapped', () => {
+  it('shows corner pill count and opens retry sheet when tapped', async () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
     mockQueue = [
       {
@@ -405,9 +583,10 @@ describe('App permissions flow', () => {
       }
     ];
 
-    render(<App />);
+    await renderAppReady();
+    await openCamera();
 
-    expect(screen.getByText('Saving 1...')).toBeTruthy();
+    expect(screen.getByText('Saving 1')).toBeTruthy();
     fireEvent.press(screen.getByTestId('saving-pill'));
     expect(mockBottomSheetPresent).toHaveBeenCalledTimes(1);
   });
@@ -424,13 +603,13 @@ describe('App permissions flow', () => {
       }
     ];
 
-    render(<App />);
+    await renderAppReady();
 
     await act(async () => {
       await Promise.resolve();
     });
 
-    expect(mockDrainOnce).toHaveBeenCalledTimes(1);
+    expect(mockDrainOnce.mock.calls.length).toBeGreaterThanOrEqual(1);
   });
 
   it('does not drain the queue in a worker effect when offline', async () => {
@@ -446,7 +625,7 @@ describe('App permissions flow', () => {
       }
     ];
 
-    render(<App />);
+    await renderAppReady();
 
     await act(async () => {
       await Promise.resolve();

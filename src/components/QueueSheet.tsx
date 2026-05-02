@@ -1,12 +1,20 @@
 import { BottomSheetFlatList, BottomSheetModal, BottomSheetView } from '@gorhom/bottom-sheet';
 import { forwardRef, useMemo, type ForwardedRef } from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, StyleSheet, View } from 'react-native';
+import { Button, Chip, Text } from 'react-native-paper';
 
 import type { ScannerQueueItem } from '../../store/scanner';
+import { useAppTheme } from '../theme/materialTheme';
 
 type QueueSheetProps = {
   items: ScannerQueueItem[];
   onRetry: (id: string) => void;
+};
+
+const statusCopy: Record<ScannerQueueItem['status'], string> = {
+  failed: 'Needs retry',
+  parsing: 'Finishing',
+  uploading: 'Saving'
 };
 
 function QueueSheetImpl(
@@ -14,32 +22,49 @@ function QueueSheetImpl(
   ref: ForwardedRef<BottomSheetModal>
 ) {
   const snapPoints = useMemo(() => ['45%', '80%'], []);
+  const theme = useAppTheme();
 
   return (
+    // BottomSheet is kept for queue retry because it overlays the camera flow.
     <BottomSheetModal ref={ref} snapPoints={snapPoints}>
-      <BottomSheetView style={styles.container}>
-        <Text style={styles.title}>Background Saves</Text>
+      <BottomSheetView style={[styles.container, { backgroundColor: theme.colors.surface }]}>
+        <Text style={styles.title} variant="titleLarge">
+          Background saves
+        </Text>
+        <Text style={{ color: theme.colors.onSurfaceVariant, marginBottom: 8 }} variant="bodyMedium">
+          These scans will finish uploading as soon as connectivity is available.
+        </Text>
         <BottomSheetFlatList
           data={items}
+          ListEmptyComponent={
+            <Text style={{ color: theme.colors.onSurfaceVariant, paddingTop: 12 }} variant="bodyMedium">
+              Nothing is waiting to sync right now.
+            </Text>
+          }
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
             <View style={styles.row}>
               <Image source={{ uri: item.imagePath }} style={styles.thumb} />
               <View style={styles.meta}>
-                <Text numberOfLines={1} style={styles.idText}>{item.id}</Text>
-                <View style={[styles.chip, item.status === 'failed' && styles.failedChip]}>
-                  <Text style={styles.chipText}>{item.status}</Text>
-                </View>
-                {item.error ? <Text numberOfLines={1} style={styles.errorText}>{item.error}</Text> : null}
+                <Text numberOfLines={1} variant="labelLarge">
+                  Business card
+                </Text>
+                <Chip compact mode="flat" style={styles.chip}>{statusCopy[item.status]}</Chip>
+                {item.error ? (
+                  <Text numberOfLines={1} style={{ color: theme.colors.error, marginTop: 6 }} variant="bodySmall">
+                    Could not save, check your connection and retry.
+                  </Text>
+                ) : null}
               </View>
               {item.status === 'failed' ? (
-                <Pressable
+                <Button
+                  compact
+                  mode="contained"
                   onPress={() => onRetry(item.id)}
-                  style={styles.retryButton}
                   testID={`retry-${item.id}`}
                 >
-                  <Text style={styles.retryText}>Retry</Text>
-                </Pressable>
+                  Retry
+                </Button>
               ) : null}
             </View>
           )}
@@ -54,51 +79,16 @@ export const QueueSheet = forwardRef(QueueSheetImpl);
 const styles = StyleSheet.create({
   chip: {
     alignSelf: 'flex-start',
-    backgroundColor: '#0c7d45',
-    borderRadius: 999,
-    marginTop: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 2
-  },
-  chipText: {
-    color: '#ffffff',
-    fontSize: 12,
-    fontWeight: '700',
-    textTransform: 'capitalize'
+    marginTop: 6
   },
   container: {
     flex: 1,
     paddingHorizontal: 16,
     paddingVertical: 8
   },
-  errorText: {
-    color: '#b42318',
-    fontSize: 12,
-    marginTop: 6
-  },
-  failedChip: {
-    backgroundColor: '#b42318'
-  },
-  idText: {
-    color: '#101828',
-    fontSize: 12,
-    fontWeight: '600'
-  },
   meta: {
     flex: 1,
     marginHorizontal: 10
-  },
-  retryButton: {
-    alignSelf: 'center',
-    backgroundColor: '#101828',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 6
-  },
-  retryText: {
-    color: '#ffffff',
-    fontSize: 12,
-    fontWeight: '700'
   },
   row: {
     alignItems: 'center',
@@ -106,15 +96,11 @@ const styles = StyleSheet.create({
     paddingVertical: 10
   },
   thumb: {
-    backgroundColor: '#e4e7ec',
     borderRadius: 8,
     height: 52,
     width: 52
   },
   title: {
-    color: '#101828',
-    fontSize: 16,
-    fontWeight: '700',
     marginBottom: 8
   }
 });

@@ -10,6 +10,7 @@ const EMPTY: ParsedCard = {
   fullName: null,
   jobTitle: null,
   companyName: null,
+  address: null,
   email: null,
   phoneNumber: null,
 };
@@ -19,6 +20,7 @@ Deno.test("parsedCardSchema: parses well-formed object", () => {
     fullName: "Ada Lovelace",
     jobTitle: "Engineer",
     companyName: "Analytical Engines",
+    address: "1 Engine Way",
     email: "ada@example.com",
     phoneNumber: "+1 111 222 3333",
   });
@@ -27,6 +29,7 @@ Deno.test("parsedCardSchema: parses well-formed object", () => {
     fullName: "Ada Lovelace",
     jobTitle: "Engineer",
     companyName: "Analytical Engines",
+    address: "1 Engine Way",
     email: "ada@example.com",
     phoneNumber: "+1 111 222 3333",
   });
@@ -82,6 +85,7 @@ Deno.test("parsedCardSchema: drops extra keys", () => {
     fullName: "Grace Hopper",
   });
   assertEquals(Object.keys(parsed).sort(), [
+    "address",
     "companyName",
     "email",
     "fullName",
@@ -96,6 +100,7 @@ Deno.test("parsedCardSchema: all-null payload yields unparsed", () => {
     fullName: null,
     jobTitle: null,
     companyName: null,
+    address: null,
     email: null,
     phoneNumber: null,
   });
@@ -128,6 +133,7 @@ Deno.test(
       fullName: { first: "Ada" },
       jobTitle: true,
       companyName: false,
+      address: { line1: "1 Engine Way" },
       email: { value: "ada@example.com" },
       phoneNumber: { countryCode: "+1", local: "1234567" },
     });

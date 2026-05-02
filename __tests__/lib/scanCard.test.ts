@@ -73,4 +73,26 @@ describe('invokeScanCard', () => {
       })
     ).rejects.toEqual(new ScanCardInvokeError('Network request failed'));
   });
+
+  it('surfaces the function response body when invoke returns an HTTP error', async () => {
+    (supabase.functions.invoke as jest.Mock).mockResolvedValue({
+      data: null,
+      error: {
+        message: 'Edge Function returned a non-2xx status code',
+        context: {
+          json: jest.fn().mockResolvedValue({
+            error: 'Image download failed'
+          })
+        }
+      }
+    });
+
+    await expect(
+      invokeScanCard({
+        imagePath: 'card-images/user-123/lead-456.jpg',
+        leadId: 'f8f0e7d3-3fd4-49e6-b5f4-2391660bfd3e',
+        rawText: 'John Doe\\nAcme Corp\\nSales Manager'
+      })
+    ).rejects.toEqual(new ScanCardInvokeError('Image download failed'));
+  });
 });

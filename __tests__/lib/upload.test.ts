@@ -12,18 +12,22 @@ jest.mock('../../src/lib/supabase', () => ({
   }
 }));
 
+jest.mock('expo-file-system/legacy', () => ({
+  EncodingType: {
+    Base64: 'base64'
+  },
+  readAsStringAsync: jest.fn()
+}));
+
+import * as FileSystem from 'expo-file-system/legacy';
+
 describe('uploadCardImage', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
   it('uploads to owner scoped path with upsert disabled and returns storage path', async () => {
-    const mockBlob = { size: 10, type: 'image/jpeg' } as Blob;
-    const mockFetch = jest.fn().mockResolvedValue({
-      blob: jest.fn().mockResolvedValue(mockBlob),
-      ok: true
-    });
-    global.fetch = mockFetch as unknown as typeof fetch;
+    (FileSystem.readAsStringAsync as jest.Mock).mockResolvedValue('ZmFrZS1pbWFnZQ==');
 
     (supabase.auth.getUser as jest.Mock).mockResolvedValue({
       data: { user: { id: 'user-123' } },
@@ -35,9 +39,11 @@ describe('uploadCardImage', () => {
 
     const storagePath = await uploadCardImage('file:///cache/prepared.jpg', 'lead-456');
 
-    expect(mockFetch).toHaveBeenCalledWith('file:///cache/prepared.jpg');
+    expect(FileSystem.readAsStringAsync).toHaveBeenCalledWith('file:///cache/prepared.jpg', {
+      encoding: 'base64'
+    });
     expect(supabase.storage.from).toHaveBeenCalledWith('card-images');
-    expect(upload).toHaveBeenCalledWith('user-123/lead-456.jpg', mockBlob, {
+    expect(upload).toHaveBeenCalledWith('user-123/lead-456.jpg', expect.any(ArrayBuffer), {
       contentType: 'image/jpeg',
       upsert: false
     });

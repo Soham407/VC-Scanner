@@ -12,8 +12,6 @@ const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");
 const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY");
 const STORAGE_BUCKET = "card-images";
 
-const SYSTEM_PROMPT = "You are a data extraction API. Parse the following OCR text from a business card and return ONLY a JSON object with the keys: fullName, jobTitle, companyName, email, and phoneNumber. Do not include markdown formatting or conversational text.";
-
 const requestSchema = z.object({
   rawText: z.string().min(1),
   imagePath: z.string().min(1),
@@ -44,6 +42,49 @@ function requireEnv(name: string, value: string | undefined): string {
   }
 
   return value;
+}
+
+function normalizeStoragePath(imagePath: string): string {
+  if (imagePath.startsWith(`${STORAGE_BUCKET}/`)) {
+    return imagePath.slice(STORAGE_BUCKET.length + 1);
+  }
+
+  return imagePath;
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+
+  for (let index = 0; index < bytes.length; index += 1) {
+    binary += String.fromCharCode(bytes[index]);
+  }
+
+  return btoa(binary);
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (typeof error === "string" && error.trim().length > 0) {
+    return error;
+  }
+
+  if (typeof error === "object" && error !== null) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim().length > 0) {
+      return message;
+    }
+
+    const errorValue = (error as { error?: unknown }).error;
+    if (typeof errorValue === "string" && errorValue.trim().length > 0) {
+      return errorValue;
+    }
+  }
+
+  return "Internal server error";
 }
 
 Deno.serve(async (req) => {
@@ -86,20 +127,25 @@ Deno.serve(async (req) => {
       return jsonResponse({ ok: false, error: "Unauthorized" }, 401);
     }
 
+    const downloadPath = normalizeStoragePath(bodyResult.data.imagePath);
+    const { data: imageBlob, error: downloadError } = await supabase.storage
+      .from(STORAGE_BUCKET)
+      .download(downloadPath);
+
+    if (downloadError || !imageBlob) {
+      return jsonResponse({ ok: false, error: "Image download failed" }, 500);
+    }
+
+    const imageBase64 = arrayBufferToBase64(await imageBlob.arrayBuffer());
     const llmPayload = await createJsonCompletion({
       apiKey: groqApiKey,
-      systemPrompt: SYSTEM_PROMPT,
-      userPrompt: bodyResult.data.rawText,
+      rawText: bodyResult.data.rawText,
+      imageDataUrl: `data:${imageBlob.type || "image/jpeg"};base64,${imageBase64}`,
     });
 
     const parsed = coerceParsedCard(llmPayload);
     const parseStatus = getParseStatus(parsed);
 
-    const imageUrlResult = supabase.storage
-      .from(STORAGE_BUCKET)
-      .getPublicUrl(bodyResult.data.imagePath);
-
-    const imageUrl = imageUrlResult.data.publicUrl;
     const dbFields = mapToDb(parsed);
 
     const { error: insertError } = await supabase
@@ -109,7 +155,7 @@ Deno.serve(async (req) => {
         user_id: userData.user.id,
         booth_id: bodyResult.data.boothId ?? null,
         ...dbFields,
-        image_url: imageUrl,
+        image_url: downloadPath,
         raw_ocr_text: bodyResult.data.rawText,
         parse_status: parseStatus,
       });
@@ -126,6 +172,6 @@ Deno.serve(async (req) => {
     });
   } catch (error) {
     console.error("scan-card failed", error);
-    return jsonResponse({ ok: false, error: "Internal server error" }, 500);
+    return jsonResponse({ ok: false, error: getErrorMessage(error) }, 500);
   }
 });

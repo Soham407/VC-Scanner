@@ -1,0 +1,51 @@
+{
+  "version": "5",
+  "specifiers": {
+    "jsr:@std/assert@*": "1.0.19",
+    "jsr:@std/internal@^1.0.12": "1.0.13"
+  },
+  "jsr": {
+    "@std/assert@1.0.19": {
+      "integrity": "eaada96ee120cb980bc47e040f82814d786fe8162ecc53c91d8df60b8755991e",
+      "dependencies": [
+        "jsr:@std/internal"
+      ]
+    },
+    "@std/internal@1.0.13": {
+      "integrity": "2f9546691d4ac2d32859c82dff284aaeac980ddeca38430d07941e7e288725c0"
+    }
+  },
+  "workspace": {
+    "packageJson": {
+      "dependencies": [
+        "npm:@gorhom/bottom-sheet@^5.2.13",
+        "npm:@react-native-async-storage/async-storage@2.2.0",
+        "npm:@react-native-community/netinfo@^12.0.1",
+        "npm:@react-native-ml-kit/text-recognition@2",
+        "npm:@supabase/supabase-js@^2.105.1",
+        "npm:@testing-library/react-native@^13.3.3",
+        "npm:@types/jest@^29.5.14",
+        "npm:@types/react@19.1",
+        "npm:babel-preset-expo@^55.0.18",
+        "npm:expo-camera@~17.0.10",
+        "npm:expo-file-system@~19.0.22",
+        "npm:expo-image-manipulator@~14.0.8",
+        "npm:expo-image-picker@~17.0.11",
+        "npm:expo-status-bar@~3.0.9",
+        "npm:expo@~54.0.33",
+        "npm:groq-sdk@^1.1.2",
+        "npm:jest-expo@~54.0.17",
+        "npm:jest@^29.7.0",
+        "npm:react-native-dotenv@^3.4.11",
+        "npm:react-native-gesture-handler@^2.31.1",
+        "npm:react-native-reanimated@^4.3.0",
+        "npm:react-native@0.81.5",
+        "npm:react-test-renderer@^19.1.0",
+        "npm:react@19.1.0",
+        "npm:typescript@~5.9.2",
+        "npm:zod@^4.4.1",
+        "npm:zustand@^5.0.12"
+      ]
+    }
+  }
+}

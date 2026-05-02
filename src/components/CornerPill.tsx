@@ -1,5 +1,9 @@
 import { JSX } from 'react';
-import { Pressable, StyleSheet, Text } from 'react-native';
+import { StyleSheet } from 'react-native';
+import Animated, { FadeInDown, FadeOutUp, LinearTransition } from 'react-native-reanimated';
+import { Chip } from 'react-native-paper';
+
+import { motion } from '../theme/motion';
 
 type CornerPillProps = {
   count: number;
@@ -12,26 +16,31 @@ export function CornerPill({ count, onPress }: CornerPillProps): JSX.Element | n
   }
 
   return (
-    <Pressable onPress={onPress} style={styles.pill} testID="saving-pill">
-      <Text style={styles.text}>{`Saving ${count}...`}</Text>
-    </Pressable>
+    <Animated.View
+      entering={FadeInDown.duration(motion.duration.medium1).easing(motion.easing.emphasized)}
+      exiting={FadeOutUp.duration(motion.duration.short4).easing(motion.easing.emphasizedExit)}
+      layout={LinearTransition.springify().damping(18).stiffness(420)}
+      style={styles.pill}
+    >
+      <Chip
+        accessibilityLabel={`${count} background save${count === 1 ? '' : 's'} in progress`}
+        compact
+        icon="cloud-sync"
+        mode="flat"
+        onPress={onPress}
+        testID="saving-pill"
+      >
+        {`Saving ${count}`}
+      </Chip>
+    </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
   pill: {
-    backgroundColor: 'rgba(0, 0, 0, 0.72)',
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
     position: 'absolute',
     right: 16,
     top: 56,
     zIndex: 10
-  },
-  text: {
-    color: '#ffffff',
-    fontSize: 13,
-    fontWeight: '700'
   }
 });

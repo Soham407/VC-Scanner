@@ -1,57 +1,71 @@
 import { JSX } from 'react';
-import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Linking, StyleSheet, View } from 'react-native';
+import { Button, Surface, Text } from 'react-native-paper';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+
+import { useAppTheme } from '../theme/materialTheme';
 
 export function PermissionDeniedScreen(): JSX.Element {
+  const theme = useAppTheme();
+
   const handleOpenSettings = (): void => {
     void Linking.openSettings();
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Camera Permission Needed</Text>
-      <Text style={styles.body}>
-        Camera access is required to scan business cards. Enable camera access in your device
-        settings to continue.
+    <Surface style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      <View style={[styles.iconWrap, { backgroundColor: theme.colors.primaryContainer }]}>
+        <MaterialCommunityIcons color={theme.colors.onPrimaryContainer} name="camera-off" size={28} />
+      </View>
+      <Text style={styles.title} variant="headlineSmall">
+        Camera permission needed
       </Text>
-      <Pressable onPress={handleOpenSettings} style={styles.button}>
-        <Text style={styles.buttonLabel}>Open Settings</Text>
-      </Pressable>
-    </View>
+      <Text style={[styles.body, { color: theme.colors.onSurfaceVariant }]} variant="bodyLarge">
+        Camera access is required to scan business cards. The app only uses the camera while you are actively capturing.
+      </Text>
+      <View style={styles.hintList}>
+        <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
+          1. Open Settings
+        </Text>
+        <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
+          2. Allow camera access
+        </Text>
+        <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
+          3. Return and scan
+        </Text>
+      </View>
+      <Button icon="cog" mode="contained" onPress={handleOpenSettings}>
+        Open Settings
+      </Button>
+    </Surface>
   );
 }
 
 const styles = StyleSheet.create({
   body: {
-    color: '#4b5563',
-    fontSize: 16,
-    lineHeight: 24,
     marginBottom: 24,
-    textAlign: 'center'
-  },
-  button: {
-    backgroundColor: '#111827',
-    borderRadius: 8,
-    minWidth: 160,
-    paddingHorizontal: 20,
-    paddingVertical: 12
-  },
-  buttonLabel: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontWeight: '600',
+    maxWidth: 320,
     textAlign: 'center'
   },
   container: {
     alignItems: 'center',
-    backgroundColor: '#f9fafb',
     flex: 1,
     justifyContent: 'center',
     paddingHorizontal: 24
   },
+  hintList: {
+    gap: 4,
+    marginBottom: 24
+  },
+  iconWrap: {
+    alignItems: 'center',
+    borderRadius: 20,
+    height: 60,
+    justifyContent: 'center',
+    marginBottom: 16,
+    width: 60
+  },
   title: {
-    color: '#111827',
-    fontSize: 24,
-    fontWeight: '700',
     marginBottom: 12,
     textAlign: 'center'
   }

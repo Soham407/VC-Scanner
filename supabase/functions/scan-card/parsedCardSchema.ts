@@ -6,6 +6,7 @@ export type ParsedCard = {
   fullName: string | null;
   jobTitle: string | null;
   companyName: string | null;
+  address: string | null;
   email: string | null;
   phoneNumber: string | null;
 };
@@ -14,6 +15,7 @@ export const EMPTY_PARSED_CARD: ParsedCard = {
   fullName: null,
   jobTitle: null,
   companyName: null,
+  address: null,
   email: null,
   phoneNumber: null,
 };
@@ -56,6 +58,7 @@ export const parsedCardSchema = z.preprocess((input) => {
     fullName: coerceToNullableString(source.fullName),
     jobTitle: coerceToNullableString(source.jobTitle),
     companyName: coerceToNullableString(source.companyName),
+    address: coerceToNullableString(source.address),
     email: coerceToNullableString(source.email),
     phoneNumber: coerceToNullableString(source.phoneNumber),
   };
@@ -63,6 +66,7 @@ export const parsedCardSchema = z.preprocess((input) => {
   fullName: z.string().nullable(),
   jobTitle: z.string().nullable(),
   companyName: z.string().nullable(),
+  address: z.string().nullable(),
   email: z.string().nullable(),
   phoneNumber: z.string().nullable(),
 }).strip());

@@ -7,6 +7,7 @@ Deno.test("mapToDb: maps every key when present", () => {
     fullName: "Ada Lovelace",
     jobTitle: "Engineer",
     companyName: "Analytical Engines",
+    address: "1 Engine Way",
     email: "ada@example.com",
     phoneNumber: "+1 111 222 3333",
   };
@@ -15,6 +16,7 @@ Deno.test("mapToDb: maps every key when present", () => {
     full_name: "Ada Lovelace",
     job_title: "Engineer",
     company_name: "Analytical Engines",
+    address: "1 Engine Way",
     email: "ada@example.com",
     phone_number: "+1 111 222 3333",
   });
@@ -25,6 +27,7 @@ Deno.test("mapToDb: preserves null values", () => {
     fullName: "Ada Lovelace",
     jobTitle: null,
     companyName: null,
+    address: null,
     email: "ada@example.com",
     phoneNumber: null,
   };
@@ -33,6 +36,7 @@ Deno.test("mapToDb: preserves null values", () => {
     full_name: "Ada Lovelace",
     job_title: null,
     company_name: null,
+    address: null,
     email: "ada@example.com",
     phone_number: null,
   });
@@ -43,6 +47,7 @@ Deno.test("mapToDb: all null output has no extra keys", () => {
     fullName: null,
     jobTitle: null,
     companyName: null,
+    address: null,
     email: null,
     phoneNumber: null,
   };
@@ -53,10 +58,12 @@ Deno.test("mapToDb: all null output has no extra keys", () => {
     full_name: null,
     job_title: null,
     company_name: null,
+    address: null,
     email: null,
     phone_number: null,
   });
   assertEquals(Object.keys(dbRow).sort(), [
+    "address",
     "company_name",
     "email",
     "full_name",

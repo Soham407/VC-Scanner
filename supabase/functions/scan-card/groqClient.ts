@@ -1,11 +1,12 @@
 import Groq from "npm:groq-sdk";
-
-const MODEL = "llama-3.1-8b-instant";
+import {
+  buildCardExtractionRequest,
+} from "./extractionPrompt.ts";
 
 type CreateJsonCompletionParams = {
   apiKey: string;
-  systemPrompt: string;
-  userPrompt: string;
+  rawText: string;
+  imageDataUrl: string;
 };
 
 export async function createJsonCompletion(
@@ -13,16 +14,12 @@ export async function createJsonCompletion(
 ): Promise<unknown> {
   const client = new Groq({ apiKey: params.apiKey });
 
-  const response = await client.chat.completions.create({
-    model: MODEL,
-    temperature: 0,
-    max_tokens: 300,
-    response_format: { type: "json_object" },
-    messages: [
-      { role: "system", content: params.systemPrompt },
-      { role: "user", content: params.userPrompt },
-    ],
-  });
+  const response = await client.chat.completions.create(
+    buildCardExtractionRequest({
+      rawText: params.rawText,
+      imageDataUrl: params.imageDataUrl,
+    }),
+  );
 
   const content = response.choices[0]?.message?.content;
 

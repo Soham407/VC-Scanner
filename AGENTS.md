@@ -6,7 +6,7 @@ Expo (React Native) prototype that scans business cards: capture → on-device O
 
 ### Backlog
 
-GitHub Issues on `Soham407/VC-Scanner` via the `gh` CLI. See `docs/agents/backlog.md`.
+GitHub Issues on `Soham407/VC-Scanner` via the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

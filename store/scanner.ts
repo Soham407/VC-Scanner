@@ -4,6 +4,8 @@ import { useStore } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { createStore } from 'zustand/vanilla';
 
+import type { InvokeScanCardResponse } from '../src/lib/scanCard';
+
 export type QueueItemStatus = 'uploading' | 'parsing' | 'failed';
 
 export type ScannerQueueItem = {
@@ -18,6 +20,23 @@ export type ScannerQueueItem = {
   error?: string;
 };
 
+export type ScannerHistoryItem = {
+  id: string;
+  imagePath: string;
+  storagePath: string;
+  rawText: string;
+  parseStatus: InvokeScanCardResponse['parseStatus'];
+  parsed: InvokeScanCardResponse['parsed'];
+  savedAt: number;
+};
+
+export type SystemNotice = {
+  kind: 'success' | 'error';
+  title: string;
+  message: string;
+  createdAt: number;
+};
+
 type EnqueueInput = {
   id: string;
   imagePath: string;
@@ -26,9 +45,10 @@ type EnqueueInput = {
 };
 
 type ScannerQueueDeps = {
+  archiveImage: (imagePath: string, leadId: string) => Promise<string>;
   deleteImage: (imagePath: string) => Promise<void>;
   getSessionUserId: () => Promise<string>;
-  invokeScanCard: (params: { imagePath: string; leadId: string; rawText: string; boothId?: string | null }) => Promise<unknown>;
+  invokeScanCard: (params: { imagePath: string; leadId: string; rawText: string; boothId?: string | null }) => Promise<InvokeScanCardResponse>;
   uploadCardImage: (localPath: string, leadId: string) => Promise<string>;
 };
 
@@ -38,6 +58,23 @@ function getDefaultDeps(): ScannerQueueDeps {
   const { uploadCardImage } = require('../src/lib/upload') as typeof import('../src/lib/upload');
 
   return {
+    archiveImage: async (imagePath, leadId) => {
+      const historyDirectory = `${FileSystem.documentDirectory ?? ''}history/`;
+      if (!FileSystem.documentDirectory) {
+        throw new Error('Document directory unavailable');
+      }
+
+      await FileSystem.makeDirectoryAsync(historyDirectory, { intermediates: true });
+
+      const archivedPath = `${historyDirectory}lead-${leadId}.jpg`;
+      await FileSystem.deleteAsync(archivedPath, { idempotent: true });
+      await FileSystem.copyAsync({
+        from: imagePath,
+        to: archivedPath
+      });
+
+      return archivedPath;
+    },
     deleteImage: async (imagePath) => {
       await FileSystem.deleteAsync(imagePath, { idempotent: true });
     },
@@ -58,11 +95,16 @@ function getDefaultDeps(): ScannerQueueDeps {
 
 export type ScannerQueueState = {
   queue: ScannerQueueItem[];
+  history: ScannerHistoryItem[];
+  systemNotice: SystemNotice | null;
   enqueue: (item: EnqueueInput) => void;
   markUploaded: (id: string, storagePath: string) => void;
   markFailed: (id: string, error: string) => void;
+  recordHistory: (item: Omit<ScannerHistoryItem, 'savedAt'> & { savedAt?: number }) => void;
+  clearSystemNotice: () => void;
   retry: (id: string) => void;
   remove: (id: string) => void;
+  clearHistory: () => void;
   drainOnce: () => Promise<void>;
 };
 
@@ -70,6 +112,9 @@ type ScannerQueueStoreOptions = {
   name?: string;
   skipHydration?: boolean;
 };
+
+const STORAGE_PREFIX = 'scanner-queue';
+let storageNamespace = 'signed-out';
 
 const RETRY_BACKOFF_MS = [1_000, 4_000, 16_000] as const;
 
@@ -91,6 +136,16 @@ function getErrorMessage(error: unknown): string {
 
   return 'Background save failed';
 }
+
+function getNamespacedStorageKey(name: string): string {
+  return `${STORAGE_PREFIX}:${storageNamespace}:${name}`;
+}
+
+const namespacedAsyncStorage = {
+  getItem: async (name: string) => AsyncStorage.getItem(getNamespacedStorageKey(name)),
+  removeItem: async (name: string) => AsyncStorage.removeItem(getNamespacedStorageKey(name)),
+  setItem: async (name: string, value: string) => AsyncStorage.setItem(getNamespacedStorageKey(name), value)
+};
 
 function getStatusCode(error: unknown): number | null {
   if (typeof error !== 'object' || error === null) {
@@ -175,6 +230,8 @@ function isRetryableError(error: unknown): boolean {
 function createScannerQueueState(deps: ScannerQueueDeps) {
   return (set: (updater: (state: ScannerQueueState) => Partial<ScannerQueueState>) => void, get: () => ScannerQueueState): ScannerQueueState => ({
     queue: [],
+    history: [],
+    systemNotice: null,
     enqueue: (item) => {
       set((state) => ({
         queue: [
@@ -190,6 +247,16 @@ function createScannerQueueState(deps: ScannerQueueDeps) {
         ]
       }));
     },
+    clearHistory: () => {
+      set(() => ({
+        history: []
+      }));
+    },
+    clearSystemNotice: () => {
+      set(() => ({
+        systemNotice: null
+      }));
+    },
     markUploaded: (id, storagePath) => {
       set((state) => ({
         queue: state.queue.map((item) =>
@@ -201,12 +268,35 @@ function createScannerQueueState(deps: ScannerQueueDeps) {
               nextAttemptAt: undefined,
               error: undefined
             }
-            : item
+          : item
         )
+      }));
+    },
+    recordHistory: (item) => {
+      set((state) => ({
+        systemNotice: {
+          createdAt: Date.now(),
+          kind: 'success',
+          message: 'Scan saved to cloud',
+          title: 'Saved'
+        },
+        history: [
+          {
+            ...item,
+            savedAt: item.savedAt ?? Date.now()
+          },
+          ...state.history.filter((existing) => existing.id !== item.id)
+        ].slice(0, 10)
       }));
     },
     markFailed: (id, error) => {
       set((state) => ({
+        systemNotice: {
+          createdAt: Date.now(),
+          kind: 'error',
+          message: error,
+          title: 'Save failed'
+        },
         queue: state.queue.map((item) =>
           item.id === id
             ? {
@@ -225,8 +315,7 @@ function createScannerQueueState(deps: ScannerQueueDeps) {
           item.id === id
             ? {
               ...item,
-              status: 'uploading',
-              storagePath: undefined,
+              status: item.storagePath ? 'parsing' : 'uploading',
               retryCount: 0,
               nextAttemptAt: undefined,
               error: undefined
@@ -268,11 +357,22 @@ function createScannerQueueState(deps: ScannerQueueDeps) {
           throw new Error('Queue item missing storagePath');
         }
 
-        await deps.invokeScanCard({
+        const archivedImagePath = await deps.archiveImage(parsingItem.imagePath, parsingItem.id);
+
+        const scanResult = await deps.invokeScanCard({
           boothId: parsingItem.boothId ?? null,
           imagePath: parsingItem.storagePath,
           leadId: parsingItem.id,
           rawText: parsingItem.rawText
+        });
+
+        get().recordHistory({
+          id: parsingItem.id,
+          imagePath: archivedImagePath,
+          parsed: scanResult.parsed,
+          parseStatus: scanResult.parseStatus,
+          rawText: parsingItem.rawText,
+          storagePath: parsingItem.storagePath
         });
 
         get().remove(parsingItem.id);
@@ -326,15 +426,29 @@ export function createScannerQueueStore(
     persist(createScannerQueueState(deps), {
       name: options.name ?? 'scanner-queue',
       skipHydration: options.skipHydration ?? false,
-      storage: createJSONStorage(() => AsyncStorage),
+      storage: createJSONStorage(() => namespacedAsyncStorage),
       partialize: (state) => ({
-        queue: state.queue
+        queue: state.queue,
+        history: state.history
       })
     })
   );
 }
 
-export const scannerQueueStore = createScannerQueueStore();
+export const scannerQueueStore = createScannerQueueStore({}, { skipHydration: true });
+
+export async function syncScannerQueueStoreNamespace(userId: string | null): Promise<void> {
+  storageNamespace = userId && userId.trim().length > 0 ? userId : 'signed-out';
+  scannerQueueStore.setState({
+    history: [],
+    queue: [],
+    systemNotice: null
+  });
+
+  if (userId) {
+    await scannerQueueStore.persist.rehydrate();
+  }
+}
 
 export function useScannerQueueStore<T>(selector: (state: ScannerQueueState) => T): T {
   return useStore(scannerQueueStore, selector);

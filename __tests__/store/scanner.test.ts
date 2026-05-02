@@ -94,7 +94,7 @@ describe('scanner queue store', () => {
     });
   });
 
-  it('retry resets failed item to uploading, clears error, and resets retryCount to 0', () => {
+it('retry resets failed item to uploading, clears error, and resets retryCount to 0', () => {
     const store = createTestStore();
 
     store.getState().enqueue({
@@ -119,10 +119,11 @@ describe('scanner queue store', () => {
 
     expect(store.getState().queue[0]).toEqual({
       id: 'lead-1',
-      status: 'uploading',
+      status: 'parsing',
       imagePath: 'file:///cache/lead-lead-1.jpg',
       rawText: 'John Doe\nAcme Corp',
-      retryCount: 0
+      retryCount: 0,
+      storagePath: 'card-images/user-1/lead-1.jpg'
     });
   });
 
@@ -130,9 +131,11 @@ describe('scanner queue store', () => {
     const uploadCardImage = jest.fn().mockResolvedValue('card-images/user-1/lead-1.jpg');
     const invokeScanCard = jest.fn().mockResolvedValue({ parseStatus: 'parsed', parsed: {} });
     const getSessionUserId = jest.fn().mockResolvedValue('user-1');
+    const archiveImage = jest.fn().mockResolvedValue('file:///documents/history/lead-1.jpg');
     const deleteImage = jest.fn().mockResolvedValue(undefined);
 
     const store = createTestStore({
+      archiveImage,
       uploadCardImage,
       invokeScanCard,
       getSessionUserId,
@@ -155,8 +158,26 @@ describe('scanner queue store', () => {
       leadId: 'lead-1',
       rawText: 'John Doe\nAcme Corp'
     });
+    expect(archiveImage).toHaveBeenCalledWith('file:///cache/lead-lead-1.jpg', 'lead-1');
     expect(deleteImage).toHaveBeenCalledWith('file:///cache/lead-lead-1.jpg');
     expect(store.getState().queue).toEqual([]);
+    expect(store.getState().history).toEqual([
+      {
+        id: 'lead-1',
+        imagePath: 'file:///documents/history/lead-1.jpg',
+        parsed: {},
+        parseStatus: 'parsed',
+        rawText: 'John Doe\nAcme Corp',
+        savedAt: expect.any(Number),
+        storagePath: 'card-images/user-1/lead-1.jpg'
+      }
+    ]);
+    expect(store.getState().systemNotice).toEqual({
+      kind: 'success',
+      title: 'Saved',
+      message: 'Scan saved to cloud',
+      createdAt: expect.any(Number)
+    });
   });
 
   it('drainOnce retries retryable failures with per-item backoff and fails after the 3rd retry', async () => {
@@ -166,8 +187,10 @@ describe('scanner queue store', () => {
       .mockRejectedValue({ message: 'Edge function 500', status: 500 });
     const getSessionUserId = jest.fn().mockResolvedValue('user-1');
     const deleteImage = jest.fn().mockResolvedValue(undefined);
+    const archiveImage = jest.fn().mockResolvedValue('file:///documents/history/lead-1.jpg');
 
     const store = createTestStore({
+      archiveImage,
       uploadCardImage,
       invokeScanCard,
       getSessionUserId,
@@ -220,6 +243,12 @@ describe('scanner queue store', () => {
       retryCount: 3,
       status: 'failed'
     });
+    expect(store.getState().systemNotice).toEqual({
+      kind: 'error',
+      title: 'Save failed',
+      message: 'Edge function 500',
+      createdAt: expect.any(Number)
+    });
   });
 
   it('drainOnce fails immediately on non-retryable 4xx-style errors', async () => {
@@ -227,8 +256,10 @@ describe('scanner queue store', () => {
     const invokeScanCard = jest.fn().mockRejectedValue({ message: 'Unauthorized', status: 401 });
     const getSessionUserId = jest.fn().mockResolvedValue('user-1');
     const deleteImage = jest.fn().mockResolvedValue(undefined);
+    const archiveImage = jest.fn().mockResolvedValue('file:///documents/history/lead-1.jpg');
 
     const store = createTestStore({
+      archiveImage,
       uploadCardImage,
       invokeScanCard,
       getSessionUserId,
@@ -259,9 +290,11 @@ describe('scanner queue store', () => {
     const uploadCardImage = jest.fn().mockResolvedValue('card-images/user-1/lead-2.jpg');
     const invokeScanCard = jest.fn().mockResolvedValue({ parseStatus: 'parsed', parsed: {} });
     const getSessionUserId = jest.fn().mockResolvedValue('user-1');
+    const archiveImage = jest.fn().mockResolvedValue('file:///documents/history/lead-2.jpg');
     const deleteImage = jest.fn().mockResolvedValue(undefined);
 
     const store = createTestStore({
+      archiveImage,
       uploadCardImage,
       invokeScanCard,
       getSessionUserId,
@@ -318,9 +351,11 @@ describe('scanner queue store', () => {
     const uploadCardImage = jest.fn().mockResolvedValue('card-images/user-1/lead-2.jpg');
     const invokeScanCard = jest.fn().mockResolvedValue({ parseStatus: 'parsed', parsed: {} });
     const getSessionUserId = jest.fn().mockResolvedValue('user-1');
+    const archiveImage = jest.fn().mockResolvedValue('file:///documents/history/lead-2.jpg');
     const deleteImage = jest.fn().mockResolvedValue(undefined);
 
     const store = createTestStore({
+      archiveImage,
       uploadCardImage,
       invokeScanCard,
       getSessionUserId,

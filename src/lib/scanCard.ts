@@ -4,6 +4,7 @@ export type ParsedCard = {
   fullName: string | null;
   jobTitle: string | null;
   companyName: string | null;
+  address: string | null;
   email: string | null;
   phoneNumber: string | null;
 };
@@ -17,7 +18,7 @@ type InvokeScanCardParams = {
   boothId?: string | null;
 };
 
-type InvokeScanCardResponse = {
+export type InvokeScanCardResponse = {
   parsed: ParsedCard;
   parseStatus: ParseStatus;
 };
@@ -41,6 +42,71 @@ export class ScanCardInvokeError extends Error {
     this.name = 'ScanCardInvokeError';
     this.status = status;
   }
+}
+
+async function extractErrorMessage(error: unknown): Promise<string | undefined> {
+  if (typeof error !== 'object' || error === null) {
+    return undefined;
+  }
+
+  const context = (error as {
+    context?: unknown;
+    message?: unknown;
+  }).context;
+
+  if (!context || typeof context !== 'object') {
+    const message = (error as { message?: unknown }).message;
+    return typeof message === 'string' && message.trim().length > 0 ? message : undefined;
+  }
+
+  const responseLike = context as {
+    json?: () => Promise<unknown>;
+    text?: () => Promise<string>;
+    status?: unknown;
+    statusText?: unknown;
+  };
+
+  try {
+    if (typeof responseLike.json === 'function') {
+      const payload = await responseLike.json();
+      if (typeof payload === 'string' && payload.trim().length > 0) {
+        return payload;
+      }
+
+      if (typeof payload === 'object' && payload !== null) {
+        const body = payload as { error?: unknown; message?: unknown };
+        if (typeof body.error === 'string' && body.error.trim().length > 0) {
+          return body.error;
+        }
+
+        if (typeof body.message === 'string' && body.message.trim().length > 0) {
+          return body.message;
+        }
+      }
+    }
+  } catch {
+    // Fall through to text/message extraction.
+  }
+
+  try {
+    if (typeof responseLike.text === 'function') {
+      const text = await responseLike.text();
+      if (typeof text === 'string' && text.trim().length > 0) {
+        return text;
+      }
+    }
+  } catch {
+    // Fall through to generic message extraction.
+  }
+
+  const status = typeof responseLike.status === 'number' ? responseLike.status : undefined;
+  const statusText = typeof responseLike.statusText === 'string' ? responseLike.statusText : undefined;
+  if (status || statusText) {
+    return [status ? `HTTP ${status}` : null, statusText ?? null].filter(Boolean).join(' ');
+  }
+
+  const message = (error as { message?: unknown }).message;
+  return typeof message === 'string' && message.trim().length > 0 ? message : undefined;
 }
 
 function getInvokeErrorStatus(error: unknown): number | undefined {
@@ -94,7 +160,8 @@ export async function invokeScanCard(params: InvokeScanCardParams): Promise<Invo
   );
 
   if (error) {
-    throw new ScanCardInvokeError(error.message, getInvokeErrorStatus(error));
+    const detailMessage = await extractErrorMessage(error);
+    throw new ScanCardInvokeError(detailMessage ?? error.message, getInvokeErrorStatus(error));
   }
 
   if (!data || !('ok' in data) || data.ok !== true) {

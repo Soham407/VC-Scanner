@@ -1,9 +1,11 @@
 import * as ImagePicker from 'expo-image-picker';
 import { JSX, useState } from 'react';
-import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, StyleSheet, View } from 'react-native';
+import { Button, Text } from 'react-native-paper';
 
 import { prepareImage } from '../lib/imagePrep';
 import { uploadCardImage } from '../lib/upload';
+import { useAppTheme } from '../theme/materialTheme';
 
 function createUuid(): string {
   const randomUuid = globalThis.crypto?.randomUUID;
@@ -33,6 +35,7 @@ async function getImageDimensions(uri: string): Promise<{ width: number; height:
 }
 
 export function DevImageUploadSurface(): JSX.Element {
+  const theme = useAppTheme();
   const [pickedImageUri, setPickedImageUri] = useState<string | null>(null);
   const [preparedCachePath, setPreparedCachePath] = useState<string | null>(null);
   const [leadId, setLeadId] = useState<string | null>(null);
@@ -110,57 +113,53 @@ export function DevImageUploadSurface(): JSX.Element {
 
   return (
     <View style={styles.container} testID="dev-upload-surface">
-      <Pressable
-        accessibilityRole="button"
+      <Button
+        compact
         disabled={isPicking}
+        mode="contained-tonal"
         onPress={() => {
           void handlePickImage();
         }}
-        style={[styles.button, isPicking && styles.disabledButton]}
+        style={styles.button}
       >
-        <Text style={styles.buttonLabel}>Pick image</Text>
-      </Pressable>
+        Pick image
+      </Button>
 
-      <Pressable
-        accessibilityRole="button"
+      <Button
+        compact
         disabled={!pickedImageUri || isPreparing}
+        mode="contained-tonal"
         onPress={() => {
           void handlePrepare();
         }}
-        style={[styles.button, (!pickedImageUri || isPreparing) && styles.disabledButton]}
+        style={styles.button}
       >
-        <Text style={styles.buttonLabel}>Prepare</Text>
-      </Pressable>
+        Prepare
+      </Button>
 
-      <Pressable
-        accessibilityRole="button"
+      <Button
+        compact
         disabled={!preparedCachePath || !leadId || isUploading}
+        mode="contained-tonal"
         onPress={() => {
           void handleUpload();
         }}
-        style={[styles.button, (!preparedCachePath || !leadId || isUploading) && styles.disabledButton]}
+        style={styles.button}
       >
-        <Text style={styles.buttonLabel}>Upload</Text>
-      </Pressable>
+        Upload
+      </Button>
 
-      {leadId ? <Text style={styles.meta}>leadId: {leadId}</Text> : null}
-      {preparedCachePath ? <Text style={styles.meta}>prepared: {preparedCachePath}</Text> : null}
+      {leadId ? <Text style={[styles.meta, { color: theme.colors.onSurface }]}>leadId: {leadId}</Text> : null}
+      {preparedCachePath ? (
+        <Text style={[styles.meta, { color: theme.colors.onSurface }]}>prepared: {preparedCachePath}</Text>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   button: {
-    backgroundColor: '#111827',
-    borderRadius: 6,
-    marginBottom: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 8
-  },
-  buttonLabel: {
-    color: '#ffffff',
-    fontSize: 12,
-    fontWeight: '600'
+    marginBottom: 8
   },
   container: {
     left: 12,
@@ -168,11 +167,7 @@ const styles = StyleSheet.create({
     top: 48,
     zIndex: 5
   },
-  disabledButton: {
-    opacity: 0.45
-  },
   meta: {
-    color: '#ffffff',
     fontSize: 11,
     marginBottom: 2,
     maxWidth: 260
