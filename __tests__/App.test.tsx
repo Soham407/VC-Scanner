@@ -27,6 +27,7 @@ const mockSignUp = jest.fn();
 const mockSignInWithOAuth = jest.fn();
 const mockExchangeCodeForSession = jest.fn();
 const mockSyncScannerQueueStoreNamespace = jest.fn().mockResolvedValue(undefined);
+const mockLoadBoothInboxReview = jest.fn();
 
 const mockSession = {
   user: {
@@ -123,6 +124,10 @@ jest.mock('../src/components/AuthScreen', () => ({
 
 jest.mock('../src/lib/boothContext', () => ({
   getActiveBoothId: (...args: unknown[]) => mockGetActiveBoothId(...args)
+}));
+
+jest.mock('../src/lib/boothInbox', () => ({
+  loadBoothInboxReview: (...args: unknown[]) => mockLoadBoothInboxReview(...args)
 }));
 
 jest.mock('../lib/ocr', () => {
@@ -246,6 +251,12 @@ describe('App permissions flow', () => {
     });
     mockPrepareImage.mockResolvedValue({ cachePath: 'file:///cache/lead-5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg' });
     mockExtractText.mockResolvedValue('John Doe\nAcme Corp\nSales Manager');
+    mockLoadBoothInboxReview.mockResolvedValue({
+      activeBoothId: null,
+      boothName: null,
+      items: [],
+      mode: 'worker-history'
+    });
     await AsyncStorage.clear();
   });
 
@@ -324,6 +335,80 @@ describe('App permissions flow', () => {
     await renderAppReady();
 
     expect(screen.getByTestId('history-button')).toBeTruthy();
+  });
+
+  it('renders the booth inbox for leader review mode', async () => {
+    mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+    mockLoadBoothInboxReview.mockResolvedValue({
+      activeBoothId: 'booth-1',
+      boothName: 'North Hall',
+      mode: 'leader-inbox',
+      items: [
+        {
+          boothId: 'booth-1',
+          capturedByUserId: 'worker-2',
+          companyName: 'Acme',
+          createdAt: '2026-05-01T12:00:00Z',
+          email: 'ada@example.com',
+          fullName: 'Ada Lovelace',
+          id: 'lead-2',
+          imagePath: 'worker-2/lead-2.jpg',
+          jobTitle: 'Engineer',
+          parseStatus: 'parsed',
+          phoneNumber: null,
+          rawText: 'Ada'
+        }
+      ]
+    });
+
+    await renderAppReady();
+
+    fireEvent.press(screen.getAllByText('History')[0]);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText('Booth inbox')).toBeTruthy();
+    expect(screen.getByText('North Hall')).toBeTruthy();
+    expect(screen.getByText('Ada Lovelace')).toBeTruthy();
+  });
+
+  it('renders worker-scoped history copy for non-leader mode', async () => {
+    mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+    mockLoadBoothInboxReview.mockResolvedValue({
+      activeBoothId: 'booth-1',
+      boothName: 'North Hall',
+      mode: 'worker-history',
+      items: [
+        {
+          boothId: 'booth-1',
+          capturedByUserId: 'worker-2',
+          companyName: 'Acme',
+          createdAt: '2026-05-01T12:00:00Z',
+          email: 'ada@example.com',
+          fullName: 'Ada Lovelace',
+          id: 'lead-2',
+          imagePath: 'worker-2/lead-2.jpg',
+          jobTitle: 'Engineer',
+          parseStatus: 'parsed',
+          phoneNumber: null,
+          rawText: 'Ada'
+        }
+      ]
+    });
+
+    await renderAppReady();
+
+    fireEvent.press(screen.getAllByText('History')[0]);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText('My history')).toBeTruthy();
+    expect(screen.queryByText('Booth inbox')).toBeNull();
+    expect(screen.queryByText('Captured by worker-2')).toBeNull();
   });
 
   it('switches the color mode from the profile page', async () => {

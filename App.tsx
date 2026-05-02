@@ -33,6 +33,7 @@ import type { Session } from '@supabase/supabase-js';
 import { AuthScreen } from './src/components/AuthScreen';
 import { BlurryImageError, extractText } from './lib/ocr';
 import { getActiveBoothId } from './src/lib/boothContext';
+import { loadBoothInboxReview, type BoothInboxItem } from './src/lib/boothInbox';
 import { CaptureButton } from './src/components/CaptureButton';
 import { CornerPill } from './src/components/CornerPill';
 import { MotionBottomNav } from './src/components/MotionBottomNav';
@@ -56,6 +57,7 @@ import {
 
 type AppTab = 'dashboard' | 'history' | 'profile';
 type HistoryFilter = 'all' | 'saved' | 'needs-review';
+type HistoryMode = 'leader-inbox' | 'worker-history';
 
 const routes: Array<{
   focusedIcon: string;
@@ -175,27 +177,24 @@ function DashboardScreen({
   );
 }
 
-function HistoryScreen({ history, onOpenCamera }: { history: ScannerHistoryItem[]; onOpenCamera: () => void }) {
+function HistoryScreen({
+  boothName,
+  isLoading,
+  items,
+  mode,
+  onOpenCamera
+}: {
+  boothName: string | null;
+  isLoading: boolean;
+  items: BoothInboxItem[];
+  mode: HistoryMode;
+  onOpenCamera: () => void;
+}) {
   const theme = useAppTheme();
-  const clearHistory = useScannerQueueStore((state) => state.clearHistory);
   const [activeFilter, setActiveFilter] = useState<HistoryFilter>('all');
-  const savedCount = history.filter((item) => item.parseStatus === 'parsed').length;
-  const needsReviewCount = history.length - savedCount;
-  const handleClearHistory = (): void => {
-    Alert.alert(
-      'Delete all cards?',
-      'This will remove every scan from your history. Background uploads already in progress will stay in the queue.',
-      [
-        { style: 'cancel', text: 'Cancel' },
-        {
-          style: 'destructive',
-          text: 'Delete',
-          onPress: clearHistory
-        }
-      ]
-    );
-  };
-  const filteredHistory = history.filter((item) => {
+  const savedCount = items.filter((item) => item.parseStatus === 'parsed').length;
+  const needsReviewCount = items.length - savedCount;
+  const filteredItems = items.filter((item) => {
     if (activeFilter === 'saved') {
       return item.parseStatus === 'parsed';
     }
@@ -206,6 +205,10 @@ function HistoryScreen({ history, onOpenCamera }: { history: ScannerHistoryItem[
 
     return true;
   });
+  const title = mode === 'leader-inbox' ? 'Booth inbox' : 'My history';
+  const subtitle = mode === 'leader-inbox'
+    ? 'Review all unassigned scans captured for this booth.'
+    : 'Review only the cards captured by your account.';
 
   return (
     <ScreenShell>
@@ -215,10 +218,15 @@ function HistoryScreen({ history, onOpenCamera }: { history: ScannerHistoryItem[
           style={[styles.historyHero, { backgroundColor: theme.colors.surfaceContainerHigh }]}
         >
           <View style={styles.historyHeroCopy}>
-            <Text variant="headlineMedium">History</Text>
+            <Text variant="headlineMedium">{title}</Text>
             <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }} variant="bodyMedium">
-              Review saved cards, filter what still needs work, and scan another card when you are ready.
+              {subtitle}
             </Text>
+            {boothName ? (
+              <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 6 }} variant="labelLarge">
+                {boothName}
+              </Text>
+            ) : null}
           </View>
           <Button icon="camera" mode="contained" onPress={onOpenCamera} testID="history-empty-scan-button">
             Scan card
@@ -229,7 +237,7 @@ function HistoryScreen({ history, onOpenCamera }: { history: ScannerHistoryItem[
       <Animated.View entering={FadeInDown.delay(110).duration(motion.duration.medium1).easing(motion.easing.emphasized)}>
         <MetricRail
           items={[
-            { label: 'Cards', tone: 'default', value: history.length },
+            { label: 'Cards', tone: 'default', value: items.length },
             { label: 'Ready', tone: 'tertiary', value: savedCount },
             { label: 'Review', tone: 'secondary', value: needsReviewCount }
           ]}
@@ -244,7 +252,7 @@ function HistoryScreen({ history, onOpenCamera }: { history: ScannerHistoryItem[
           <View style={styles.historyFilterRow}>
             <HistoryFilterPill
               active={activeFilter === 'all'}
-              count={history.length}
+              count={items.length}
               label="All"
               onPress={() => setActiveFilter('all')}
             />
@@ -261,24 +269,30 @@ function HistoryScreen({ history, onOpenCamera }: { history: ScannerHistoryItem[
               onPress={() => setActiveFilter('needs-review')}
             />
           </View>
-          {history.length > 0 ? (
-            <Button compact mode="text" onPress={handleClearHistory} textColor={theme.colors.error}>
-              Delete all
-            </Button>
-          ) : null}
         </Surface>
       </Animated.View>
 
-      {filteredHistory.length === 0 ? (
+      {isLoading ? (
+        <Card mode="outlined" style={styles.emptyCard}>
+          <Card.Content style={styles.emptyContent}>
+            <ActivityIndicator />
+            <Text style={{ marginTop: 12 }} variant="bodyMedium">
+              Loading {mode === 'leader-inbox' ? 'booth inbox' : 'history'}...
+            </Text>
+          </Card.Content>
+        </Card>
+      ) : filteredItems.length === 0 ? (
         <Card mode="outlined" style={styles.emptyCard}>
           <Card.Content style={styles.emptyContent}>
             <View style={[styles.emptyIcon, { backgroundColor: theme.colors.primaryContainer }]}>
               <List.Icon color={theme.colors.onPrimaryContainer} icon="card-account-details-outline" />
             </View>
-            <Text variant="titleMedium">{history.length === 0 ? 'No cards yet' : 'Nothing here'}</Text>
+            <Text variant="titleMedium">{items.length === 0 ? 'No cards yet' : 'Nothing here'}</Text>
             <Text style={{ color: theme.colors.onSurfaceVariant, textAlign: 'center' }} variant="bodyMedium">
-              {history.length === 0
-                ? 'Scan your first business card to build your contact history.'
+              {items.length === 0
+                ? mode === 'leader-inbox'
+                  ? 'Booth scans will appear here as your team captures cards.'
+                  : 'Scan your first business card to build your capture history.'
                 : 'Try another filter to see more cards.'}
             </Text>
             <Button icon="camera" mode="contained" onPress={onOpenCamera}>
@@ -288,13 +302,28 @@ function HistoryScreen({ history, onOpenCamera }: { history: ScannerHistoryItem[
         </Card>
       ) : (
         <View style={styles.historyList}>
-          {filteredHistory.map((item, index) => (
+          {filteredItems.map((item, index) => (
             <Animated.View
               key={item.id}
               entering={FadeInDown.delay(Math.min(index * 45, 240)).duration(motion.duration.medium1).easing(motion.easing.emphasized)}
               layout={LinearTransition.springify().damping(24).stiffness(300)}
             >
-              <RecentScanCard item={item} />
+              <Surface elevation={1} style={[styles.historyRow, { backgroundColor: theme.colors.surfaceContainer }]}>
+                <View style={styles.historyRowCopy}>
+                  <Text numberOfLines={1} variant="titleMedium">
+                    {item.fullName ?? item.companyName ?? item.rawText.split('\n')[0] ?? 'Untitled scan'}
+                  </Text>
+                  <Text numberOfLines={1} style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
+                    {item.companyName ?? item.jobTitle ?? item.email ?? item.id}
+                  </Text>
+                  {mode === 'leader-inbox' ? (
+                    <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }} variant="labelSmall">
+                      Captured by {item.capturedByUserId}
+                    </Text>
+                  ) : null}
+                </View>
+                <StatusChip status={item.parseStatus === 'parsed' ? 'parsed' : 'idle'} />
+              </Surface>
             </Animated.View>
           ))}
         </View>
@@ -638,6 +667,10 @@ function ScannerApp({
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
   const [previewUri, setPreviewUri] = useState<string | null>(null);
+  const [historyMode, setHistoryMode] = useState<HistoryMode>('worker-history');
+  const [historyItems, setHistoryItems] = useState<BoothInboxItem[]>([]);
+  const [historyBoothName, setHistoryBoothName] = useState<string | null>(null);
+  const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const captureLockRef = useRef(false);
   const queueSheetRef = useRef<BottomSheetModal>(null);
   const isDrainingRef = useRef(false);
@@ -716,6 +749,40 @@ function ScannerApp({
       }
     })();
   }, [queue, drainOnce, isConnected]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void (async () => {
+      setIsHistoryLoading(true);
+
+      try {
+        const result = await loadBoothInboxReview(session.user.id);
+        if (cancelled) {
+          return;
+        }
+
+        setHistoryMode(result.mode);
+        setHistoryBoothName(result.boothName);
+        setHistoryItems(result.items);
+      } catch (error) {
+        if (!cancelled) {
+          setHistoryMode('worker-history');
+          setHistoryBoothName(null);
+          setHistoryItems([]);
+        }
+        console.warn('Booth inbox review fetch failed', error);
+      } finally {
+        if (!cancelled) {
+          setIsHistoryLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [history.length, session.user.id]);
 
   const handleTakePicture = useCallback(async (camera: CameraView | null): Promise<string | null> => {
     if (captureLockRef.current) {
@@ -811,7 +878,15 @@ function ScannerApp({
     ({ route }: { route: { key: string } }) => {
       switch (route.key) {
         case 'history':
-          return <HistoryScreen history={history} onOpenCamera={openCamera} />;
+          return (
+            <HistoryScreen
+              boothName={historyBoothName}
+              isLoading={isHistoryLoading}
+              items={historyItems}
+              mode={historyMode}
+              onOpenCamera={openCamera}
+            />
+          );
         case 'profile':
           return <ProfileScreen onSignOut={onSignOut} userEmail={session.user.email} />;
         case 'dashboard':
@@ -828,7 +903,20 @@ function ScannerApp({
           );
       }
     },
-    [dashboardStatus, failedCount, history, inFlightCount, onSignOut, openCamera, openHistory, session.user.email]
+    [
+      dashboardStatus,
+      failedCount,
+      history,
+      historyBoothName,
+      historyItems,
+      historyMode,
+      inFlightCount,
+      isHistoryLoading,
+      onSignOut,
+      openCamera,
+      openHistory,
+      session.user.email
+    ]
   );
 
   return (
@@ -1097,6 +1185,17 @@ const styles = StyleSheet.create({
   },
   historyList: {
     gap: 10
+  },
+  historyRow: {
+    alignItems: 'center',
+    borderRadius: 20,
+    flexDirection: 'row',
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12
+  },
+  historyRowCopy: {
+    flex: 1
   },
   historyToolbar: {
     alignItems: 'center',
