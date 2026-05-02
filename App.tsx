@@ -33,6 +33,7 @@ import type { Session } from '@supabase/supabase-js';
 import { AuthScreen } from './src/components/AuthScreen';
 import { BlurryImageError, extractText } from './lib/ocr';
 import { getActiveBoothId } from './src/lib/boothContext';
+import { listPendingBoothInvitesForEmail, respondToBoothInvite, type PendingBoothInvite } from './src/lib/boothInvites';
 import { CaptureButton } from './src/components/CaptureButton';
 import { CornerPill } from './src/components/CornerPill';
 import { MotionBottomNav } from './src/components/MotionBottomNav';
@@ -896,6 +897,9 @@ function ScannerApp({
 export default function App() {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
   const [isScannerStoreReady, setIsScannerStoreReady] = useState(false);
+  const [pendingInvites, setPendingInvites] = useState<PendingBoothInvite[]>([]);
+  const [isInviteGateReady, setIsInviteGateReady] = useState(false);
+  const [isInviteDecisionSubmitting, setIsInviteDecisionSubmitting] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -972,13 +976,77 @@ export default function App() {
     };
   }, [session?.user.id]);
 
+  useEffect(() => {
+    if (session === undefined) {
+      setIsInviteGateReady(false);
+      return;
+    }
+
+    if (!session) {
+      setPendingInvites([]);
+      setIsInviteGateReady(true);
+      return;
+    }
+
+    let cancelled = false;
+
+    void (async () => {
+      setIsInviteGateReady(false);
+
+      try {
+        const nextPendingInvites = await listPendingBoothInvitesForEmail(session.user.email);
+        if (!cancelled) {
+          setPendingInvites(nextPendingInvites);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.warn('Booth invite lookup failed', error);
+          setPendingInvites([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsInviteGateReady(true);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.user.email, session?.user.id, session]);
+
   const handleSignOut = useCallback(() => {
     void supabase.auth.signOut().catch((error) => {
       console.warn('Supabase sign out failed', error);
     });
   }, []);
 
-  if (session === undefined || (session && !isScannerStoreReady)) {
+  const activeInvite = pendingInvites[0] ?? null;
+
+  const handleInviteDecision = useCallback(
+    (decision: 'accept' | 'decline') => {
+      if (!activeInvite || isInviteDecisionSubmitting) {
+        return;
+      }
+
+      setIsInviteDecisionSubmitting(true);
+
+      void (async () => {
+        try {
+          await respondToBoothInvite(activeInvite.id, decision);
+          setPendingInvites((currentInvites) => currentInvites.filter((invite) => invite.id !== activeInvite.id));
+        } catch (error) {
+          console.warn('Booth invite response failed', error);
+          Alert.alert('Invite update failed', 'Please try again.');
+        } finally {
+          setIsInviteDecisionSubmitting(false);
+        }
+      })();
+    },
+    [activeInvite, isInviteDecisionSubmitting]
+  );
+
+  if (session === undefined || (session && (!isScannerStoreReady || !isInviteGateReady))) {
     return (
       <GestureHandlerRootView style={styles.appContainer}>
         <SafeAreaProvider>
@@ -1013,6 +1081,50 @@ export default function App() {
     );
   }
 
+  if (activeInvite) {
+    return (
+      <GestureHandlerRootView style={styles.appContainer}>
+        <SafeAreaProvider>
+          <MaterialThemeProvider>
+            <BottomSheetModalProvider>
+              <StatusBar style="auto" />
+              <View style={styles.loadingScreen}>
+                <Surface style={styles.inviteGateCard}>
+                  <Text variant="headlineSmall">Booth invite pending</Text>
+                  <Text style={styles.inviteGateBody} variant="bodyMedium">
+                    {`Respond to the invite for ${activeInvite.boothName ?? 'this booth'} before using the scanner.`}
+                  </Text>
+                  <Text style={styles.inviteGateBody} variant="bodySmall">
+                    {activeInvite.invitedEmail}
+                  </Text>
+                  <View style={styles.inviteGateActions}>
+                    <Button
+                      disabled={isInviteDecisionSubmitting}
+                      mode="outlined"
+                      onPress={() => handleInviteDecision('decline')}
+                      testID="decline-booth-invite-button"
+                    >
+                      Decline
+                    </Button>
+                    <Button
+                      disabled={isInviteDecisionSubmitting}
+                      loading={isInviteDecisionSubmitting}
+                      mode="contained"
+                      onPress={() => handleInviteDecision('accept')}
+                      testID="accept-booth-invite-button"
+                    >
+                      Accept
+                    </Button>
+                  </View>
+                </Surface>
+              </View>
+            </BottomSheetModalProvider>
+          </MaterialThemeProvider>
+        </SafeAreaProvider>
+      </GestureHandlerRootView>
+    );
+  }
+
   return (
     <GestureHandlerRootView style={styles.appContainer}>
       <SafeAreaProvider>
@@ -1038,6 +1150,21 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: 12
+  },
+  inviteGateActions: {
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'flex-end',
+    marginTop: 20
+  },
+  inviteGateBody: {
+    marginTop: 12
+  },
+  inviteGateCard: {
+    borderRadius: 20,
+    maxWidth: 380,
+    padding: 20,
+    width: '92%'
   },
   cameraContainer: {
     flex: 1

@@ -16,6 +16,8 @@ const mockRetry = jest.fn();
 const mockDrainOnce = jest.fn();
 const mockGarbageCollect = jest.fn();
 const mockGetActiveBoothId = jest.fn();
+const mockListPendingBoothInvitesForEmail = jest.fn();
+const mockRespondToBoothInvite = jest.fn();
 const mockBottomSheetPresent = jest.fn();
 const mockClearSystemNotice = jest.fn();
 const mockUseNetInfo = jest.fn();
@@ -123,6 +125,11 @@ jest.mock('../src/components/AuthScreen', () => ({
 
 jest.mock('../src/lib/boothContext', () => ({
   getActiveBoothId: (...args: unknown[]) => mockGetActiveBoothId(...args)
+}));
+
+jest.mock('../src/lib/boothInvites', () => ({
+  listPendingBoothInvitesForEmail: (...args: unknown[]) => mockListPendingBoothInvitesForEmail(...args),
+  respondToBoothInvite: (...args: unknown[]) => mockRespondToBoothInvite(...args)
 }));
 
 jest.mock('../lib/ocr', () => {
@@ -236,6 +243,8 @@ describe('App permissions flow', () => {
     mockGarbageCollect.mockResolvedValue(undefined);
     mockDrainOnce.mockResolvedValue(undefined);
     mockGetActiveBoothId.mockResolvedValue(null);
+    mockListPendingBoothInvitesForEmail.mockResolvedValue([]);
+    mockRespondToBoothInvite.mockResolvedValue(undefined);
     mockGetSession.mockResolvedValue({ data: { session: mockSession }, error: null });
     mockOnAuthStateChange.mockReturnValue({
       data: {
@@ -265,6 +274,34 @@ describe('App permissions flow', () => {
     await renderAppReady();
 
     expect(screen.getByText('Auth screen')).toBeTruthy();
+  });
+
+  it('shows a blocking pending-invite gate for signed-in users and resolves on accept', async () => {
+    mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+    mockListPendingBoothInvitesForEmail.mockResolvedValue([
+      {
+        id: 'invite-1',
+        boothId: 'booth-1',
+        boothName: 'Main Booth',
+        createdAt: '2026-05-02T11:00:00.000Z',
+        invitedEmail: 'user@example.com'
+      }
+    ]);
+
+    await renderAppReady();
+
+    expect(screen.getByText('Booth invite pending')).toBeTruthy();
+    expect(screen.queryAllByText('Dashboard')).toHaveLength(0);
+
+    fireEvent.press(screen.getByTestId('accept-booth-invite-button'));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockRespondToBoothInvite).toHaveBeenCalledWith('invite-1', 'accept');
+    expect(screen.queryByText('Booth invite pending')).toBeNull();
+    expect(screen.getAllByText('Dashboard').length).toBeGreaterThan(0);
   });
 
   it('renders denied screen and opens settings when permission is denied', async () => {
