@@ -7,6 +7,7 @@ import { Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { BlurryImageError, extractText } from './lib/ocr';
+import { getActiveBoothId } from './src/lib/boothContext';
 import { bootstrapAnonymousSession } from './src/lib/supabase';
 import { garbageCollectOrphanedQueueImages, scannerQueueStore, useScannerQueueStore } from './store/scanner';
 import { CaptureButton } from './src/components/CaptureButton';
@@ -132,11 +133,19 @@ export default function App() {
         const leadId = createUuid();
         const { cachePath } = await prepareImage(uri, leadId);
         const rawText = await extractText(cachePath);
+        let boothId: string | null = null;
+
+        try {
+          boothId = await getActiveBoothId();
+        } catch (error) {
+          console.warn('Active booth lookup failed; routing capture without booth context', error);
+        }
 
         enqueue({
           id: leadId,
           imagePath: cachePath,
-          rawText
+          rawText,
+          boothId
         });
       } catch (error) {
         if (error instanceof BlurryImageError) {

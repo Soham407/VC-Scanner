@@ -14,7 +14,7 @@ describe('invokeScanCard', () => {
     jest.clearAllMocks();
   });
 
-  it('invokes scan-card with rawText, imagePath, and leadId and returns parsed payload', async () => {
+  it('invokes scan-card with rawText, imagePath, leadId, and boothId and returns parsed payload', async () => {
     (supabase.functions.invoke as jest.Mock).mockResolvedValue({
       data: {
         ok: true,
@@ -32,6 +32,7 @@ describe('invokeScanCard', () => {
 
     await expect(
       invokeScanCard({
+        boothId: '4d2b274e-c0df-4f8a-a440-9db95d130f18',
         imagePath: 'card-images/user-123/lead-456.jpg',
         leadId: 'f8f0e7d3-3fd4-49e6-b5f4-2391660bfd3e',
         rawText: 'John Doe\\nAcme Corp\\nSales Manager'
@@ -49,6 +50,7 @@ describe('invokeScanCard', () => {
 
     expect(supabase.functions.invoke).toHaveBeenCalledWith('scan-card', {
       body: {
+        boothId: '4d2b274e-c0df-4f8a-a440-9db95d130f18',
         imagePath: 'card-images/user-123/lead-456.jpg',
         leadId: 'f8f0e7d3-3fd4-49e6-b5f4-2391660bfd3e',
         rawText: 'John Doe\\nAcme Corp\\nSales Manager'
@@ -64,6 +66,7 @@ describe('invokeScanCard', () => {
 
     await expect(
       invokeScanCard({
+        boothId: null,
         imagePath: 'card-images/user-123/lead-456.jpg',
         leadId: 'f8f0e7d3-3fd4-49e6-b5f4-2391660bfd3e',
         rawText: 'John Doe\\nAcme Corp\\nSales Manager'

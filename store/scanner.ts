@@ -10,6 +10,7 @@ export type ScannerQueueItem = {
   id: string;
   status: QueueItemStatus;
   imagePath: string;
+  boothId?: string | null;
   storagePath?: string;
   rawText: string;
   retryCount: number;
@@ -21,12 +22,13 @@ type EnqueueInput = {
   id: string;
   imagePath: string;
   rawText: string;
+  boothId?: string | null;
 };
 
 type ScannerQueueDeps = {
   deleteImage: (imagePath: string) => Promise<void>;
   getSessionUserId: () => Promise<string>;
-  invokeScanCard: (params: { imagePath: string; leadId: string; rawText: string }) => Promise<unknown>;
+  invokeScanCard: (params: { imagePath: string; leadId: string; rawText: string; boothId?: string | null }) => Promise<unknown>;
   uploadCardImage: (localPath: string, leadId: string) => Promise<string>;
 };
 
@@ -180,6 +182,7 @@ function createScannerQueueState(deps: ScannerQueueDeps) {
           {
             id: item.id,
             imagePath: item.imagePath,
+            ...(item.boothId !== undefined ? { boothId: item.boothId } : {}),
             rawText: item.rawText,
             retryCount: 0,
             status: 'uploading'
@@ -266,6 +269,7 @@ function createScannerQueueState(deps: ScannerQueueDeps) {
         }
 
         await deps.invokeScanCard({
+          boothId: parsingItem.boothId ?? null,
           imagePath: parsingItem.storagePath,
           leadId: parsingItem.id,
           rawText: parsingItem.rawText

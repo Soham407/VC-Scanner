@@ -15,6 +15,7 @@ const mockEnqueue = jest.fn();
 const mockRetry = jest.fn();
 const mockDrainOnce = jest.fn();
 const mockGarbageCollect = jest.fn();
+const mockGetActiveBoothId = jest.fn();
 const mockBottomSheetPresent = jest.fn();
 const mockUseNetInfo = jest.fn();
 
@@ -52,6 +53,10 @@ jest.mock('../src/lib/imagePrep', () => ({
 
 jest.mock('../src/lib/supabase', () => ({
   bootstrapAnonymousSession: (...args: unknown[]) => mockBootstrapAnonymousSession(...args)
+}));
+
+jest.mock('../src/lib/boothContext', () => ({
+  getActiveBoothId: (...args: unknown[]) => mockGetActiveBoothId(...args)
 }));
 
 jest.mock('../lib/ocr', () => {
@@ -141,6 +146,7 @@ describe('App permissions flow', () => {
     mockUseNetInfo.mockReturnValue({ isConnected: true });
     mockGarbageCollect.mockResolvedValue(undefined);
     mockDrainOnce.mockResolvedValue(undefined);
+    mockGetActiveBoothId.mockResolvedValue(null);
     mockPrepareImage.mockResolvedValue({ cachePath: 'file:///cache/lead-5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg' });
     mockExtractText.mockResolvedValue('John Doe\nAcme Corp\nSales Manager');
   });
@@ -187,6 +193,7 @@ describe('App permissions flow', () => {
 
   it('renders a dev gallery picker button and routes selected image through capture pipeline', async () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+    mockGetActiveBoothId.mockResolvedValue('booth-77');
     (ImagePicker.launchImageLibraryAsync as jest.Mock).mockResolvedValue({
       assets: [{ uri: 'file:///tmp/gallery-card.jpg' }],
       canceled: false
@@ -215,6 +222,7 @@ describe('App permissions flow', () => {
     expect(mockPrepareImage).toHaveBeenCalledWith('file:///tmp/gallery-card.jpg', leadId);
     expect(mockExtractText).toHaveBeenCalledWith('file:///cache/lead-5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg');
     expect(mockEnqueue).toHaveBeenCalledWith({
+      boothId: 'booth-77',
       id: leadId,
       imagePath: 'file:///cache/lead-5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg',
       rawText: 'John Doe\nAcme Corp\nSales Manager'
@@ -275,6 +283,7 @@ describe('App permissions flow', () => {
   it('runs prepare -> OCR -> enqueue and returns to viewfinder without spinner', async () => {
     const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(jest.fn());
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+    mockGetActiveBoothId.mockResolvedValue('booth-99');
     mockTakePictureAsync.mockResolvedValue({
       height: 100,
       uri: 'file:///tmp/card.jpg',
@@ -301,6 +310,7 @@ describe('App permissions flow', () => {
     expect(mockPrepareImage).toHaveBeenCalledWith('file:///tmp/card.jpg', leadId);
     expect(mockExtractText).toHaveBeenCalledWith('file:///cache/lead-5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg');
     expect(mockEnqueue).toHaveBeenCalledWith({
+      boothId: 'booth-99',
       id: leadId,
       imagePath: 'file:///cache/lead-5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg',
       rawText: 'John Doe\nAcme Corp\nSales Manager'
@@ -309,6 +319,47 @@ describe('App permissions flow', () => {
     expect(screen.queryByTestId('capture-preview')).toBeNull();
     expect(screen.getByTestId('camera-viewfinder')).toBeTruthy();
     expect(alertSpy).not.toHaveBeenCalled();
+  });
+
+  it('continues capture routing without booth context when active booth lookup fails', async () => {
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(jest.fn());
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(jest.fn());
+    mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+    mockGetActiveBoothId.mockRejectedValue(new Error('context lookup failed'));
+    mockTakePictureAsync.mockResolvedValue({
+      height: 100,
+      uri: 'file:///tmp/card.jpg',
+      width: 200
+    });
+
+    const leadId = '5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8';
+    Object.defineProperty(globalThis, 'crypto', {
+      configurable: true,
+      value: {
+        ...(globalThis.crypto ?? {}),
+        randomUUID: jest.fn().mockReturnValue(leadId)
+      }
+    });
+
+    render(<App />);
+
+    fireEvent.press(screen.getByTestId('capture-button'));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockEnqueue).toHaveBeenCalledWith({
+      boothId: null,
+      id: leadId,
+      imagePath: 'file:///cache/lead-5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg',
+      rawText: 'John Doe\nAcme Corp\nSales Manager'
+    });
+    expect(alertSpy).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      'Active booth lookup failed; routing capture without booth context',
+      expect.any(Error)
+    );
   });
 
   it('shows blurry retake alert and aborts enqueue when OCR throws BlurryImageError', async () => {
