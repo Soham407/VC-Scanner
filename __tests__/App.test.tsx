@@ -18,6 +18,8 @@ const mockGarbageCollect = jest.fn();
 const mockGetActiveBoothId = jest.fn();
 const mockListPendingBoothInvitesForEmail = jest.fn();
 const mockRespondToBoothInvite = jest.fn();
+const mockCreateBoothAssignmentBatch = jest.fn();
+const mockApproveBoothAssignmentBatch = jest.fn();
 const mockBottomSheetPresent = jest.fn();
 const mockClearSystemNotice = jest.fn();
 const mockUseNetInfo = jest.fn();
@@ -136,6 +138,10 @@ jest.mock('../src/lib/boothInvites', () => ({
   listPendingBoothInvitesForEmail: (...args: unknown[]) => mockListPendingBoothInvitesForEmail(...args),
   respondToBoothInvite: (...args: unknown[]) => mockRespondToBoothInvite(...args)
 }));
+jest.mock('../src/lib/boothAssignments', () => ({
+  createBoothAssignmentBatch: (...args: unknown[]) => mockCreateBoothAssignmentBatch(...args),
+  approveBoothAssignmentBatch: (...args: unknown[]) => mockApproveBoothAssignmentBatch(...args)
+}));
 
 jest.mock('../lib/ocr', () => {
   class MockBlurryImageError extends Error {
@@ -250,6 +256,13 @@ describe('App permissions flow', () => {
     mockGetActiveBoothId.mockResolvedValue(null);
     mockListPendingBoothInvitesForEmail.mockResolvedValue([]);
     mockRespondToBoothInvite.mockResolvedValue(undefined);
+    mockCreateBoothAssignmentBatch.mockResolvedValue({
+      batchId: 'batch-1',
+      scanCount: 2
+    });
+    mockApproveBoothAssignmentBatch.mockResolvedValue({
+      assignedCount: 2
+    });
     mockGetSession.mockResolvedValue({ data: { session: mockSession }, error: null });
     mockOnAuthStateChange.mockReturnValue({
       data: {
@@ -411,6 +424,59 @@ describe('App permissions flow', () => {
     expect(screen.getByText('Ada Lovelace')).toBeTruthy();
   });
 
+  it('lets a leader create and approve a batch from the booth inbox', async () => {
+    mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+    mockLoadBoothInboxReview.mockResolvedValue({
+      activeBoothId: 'booth-1',
+      boothName: 'North Hall',
+      mode: 'leader-inbox',
+      items: [
+        {
+          boothId: 'booth-1',
+          capturedByUserId: 'worker-2',
+          companyName: 'Acme',
+          createdAt: '2026-05-01T12:00:00Z',
+          email: 'ada@example.com',
+          fullName: 'Ada Lovelace',
+          id: 'lead-2',
+          imagePath: 'worker-2/lead-2.jpg',
+          jobTitle: 'Engineer',
+          parseStatus: 'parsed',
+          phoneNumber: null,
+          rawText: 'Ada'
+        }
+      ]
+    });
+    mockCreateBoothAssignmentBatch.mockResolvedValue({
+      batchId: 'batch-7',
+      scanCount: 1
+    });
+
+    await renderAppReady();
+
+    fireEvent.press(screen.getAllByText('History')[0]);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    fireEvent.press(screen.getByTestId('create-assignment-batch-button'));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockCreateBoothAssignmentBatch).toHaveBeenCalledWith('booth-1');
+
+    fireEvent.press(screen.getByTestId('approve-assignment-batch-button'));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockApproveBoothAssignmentBatch).toHaveBeenCalledWith('batch-7');
+  });
+
   it('renders worker-scoped history copy for non-leader mode', async () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
     mockLoadBoothInboxReview.mockResolvedValue({
@@ -443,7 +509,7 @@ describe('App permissions flow', () => {
       await Promise.resolve();
     });
 
-    expect(screen.getByText('My history')).toBeTruthy();
+    expect(screen.getByText('My follow-up work')).toBeTruthy();
     expect(screen.queryByText('Booth inbox')).toBeNull();
     expect(screen.queryByText('Captured by worker-2')).toBeNull();
   });

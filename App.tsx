@@ -33,6 +33,7 @@ import type { Session } from '@supabase/supabase-js';
 import { AuthScreen } from './src/components/AuthScreen';
 import { BlurryImageError, extractText } from './lib/ocr';
 import { getActiveBoothId } from './src/lib/boothContext';
+import { approveBoothAssignmentBatch, createBoothAssignmentBatch } from './src/lib/boothAssignments';
 import { loadBoothInboxReview, type BoothInboxItem } from './src/lib/boothInbox';
 import { listPendingBoothInvitesForEmail, respondToBoothInvite, type PendingBoothInvite } from './src/lib/boothInvites';
 import { CaptureButton } from './src/components/CaptureButton';
@@ -179,16 +180,26 @@ function DashboardScreen({
 }
 
 function HistoryScreen({
+  canApproveBatch,
+  canCreateBatch,
   boothName,
+  isBatchActionLoading,
   isLoading,
   items,
   mode,
+  onApproveBatch,
+  onCreateBatch,
   onOpenCamera
 }: {
+  canApproveBatch: boolean;
+  canCreateBatch: boolean;
   boothName: string | null;
+  isBatchActionLoading: boolean;
   isLoading: boolean;
   items: BoothInboxItem[];
   mode: HistoryMode;
+  onApproveBatch: () => void;
+  onCreateBatch: () => void;
   onOpenCamera: () => void;
 }) {
   const theme = useAppTheme();
@@ -206,10 +217,10 @@ function HistoryScreen({
 
     return true;
   });
-  const title = mode === 'leader-inbox' ? 'Booth inbox' : 'My history';
+  const title = mode === 'leader-inbox' ? 'Booth inbox' : 'My follow-up work';
   const subtitle = mode === 'leader-inbox'
     ? 'Review all unassigned scans captured for this booth.'
-    : 'Review only the cards captured by your account.';
+    : 'Review only scans assigned to your account for follow-up.';
 
   return (
     <ScreenShell>
@@ -244,6 +255,33 @@ function HistoryScreen({
           ]}
         />
       </Animated.View>
+      {mode === 'leader-inbox' ? (
+        <Animated.View entering={FadeInDown.delay(130).duration(motion.duration.medium1).easing(motion.easing.emphasized)}>
+          <Surface
+            elevation={1}
+            style={[styles.historyToolbar, { backgroundColor: theme.colors.surfaceContainer }]}
+          >
+            <View style={styles.batchActions}>
+              <Button
+                disabled={!canCreateBatch || isBatchActionLoading}
+                mode="outlined"
+                onPress={onCreateBatch}
+                testID="create-assignment-batch-button"
+              >
+                Create batch
+              </Button>
+              <Button
+                disabled={!canApproveBatch || isBatchActionLoading}
+                mode="contained"
+                onPress={onApproveBatch}
+                testID="approve-assignment-batch-button"
+              >
+                Approve batch
+              </Button>
+            </View>
+          </Surface>
+        </Animated.View>
+      ) : null}
 
       <Animated.View entering={FadeInDown.delay(150).duration(motion.duration.medium1).easing(motion.easing.emphasized)}>
         <Surface
@@ -293,7 +331,7 @@ function HistoryScreen({
               {items.length === 0
                 ? mode === 'leader-inbox'
                   ? 'Booth scans will appear here as your team captures cards.'
-                  : 'Scan your first business card to build your capture history.'
+                  : 'Assigned scans will appear here after your booth leader approves a batch.'
                 : 'Try another filter to see more cards.'}
             </Text>
             <Button icon="camera" mode="contained" onPress={onOpenCamera}>
@@ -671,7 +709,10 @@ function ScannerApp({
   const [historyMode, setHistoryMode] = useState<HistoryMode>('worker-history');
   const [historyItems, setHistoryItems] = useState<BoothInboxItem[]>([]);
   const [historyBoothName, setHistoryBoothName] = useState<string | null>(null);
+  const [historyActiveBoothId, setHistoryActiveBoothId] = useState<string | null>(null);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
+  const [pendingBatchId, setPendingBatchId] = useState<string | null>(null);
+  const [isBatchActionLoading, setIsBatchActionLoading] = useState(false);
   const captureLockRef = useRef(false);
   const queueSheetRef = useRef<BottomSheetModal>(null);
   const isDrainingRef = useRef(false);
@@ -751,39 +792,68 @@ function ScannerApp({
     })();
   }, [queue, drainOnce, isConnected]);
 
+  const refreshHistory = useCallback(async (): Promise<void> => {
+    setIsHistoryLoading(true);
+
+    try {
+      const result = await loadBoothInboxReview(session.user.id);
+      setHistoryMode(result.mode);
+      setHistoryBoothName(result.boothName);
+      setHistoryItems(result.items);
+      setHistoryActiveBoothId(result.activeBoothId);
+    } catch (error) {
+      setHistoryMode('worker-history');
+      setHistoryBoothName(null);
+      setHistoryItems([]);
+      setHistoryActiveBoothId(null);
+      console.warn('Booth inbox review fetch failed', error);
+    } finally {
+      setIsHistoryLoading(false);
+    }
+  }, [session.user.id]);
+
   useEffect(() => {
-    let cancelled = false;
-
     void (async () => {
-      setIsHistoryLoading(true);
+      await refreshHistory();
+    })();
+  }, [history.length, refreshHistory]);
 
+  const handleCreateAssignmentBatch = useCallback(() => {
+    if (historyMode !== 'leader-inbox' || !historyActiveBoothId || isBatchActionLoading) {
+      return;
+    }
+
+    setIsBatchActionLoading(true);
+    void (async () => {
       try {
-        const result = await loadBoothInboxReview(session.user.id);
-        if (cancelled) {
-          return;
-        }
-
-        setHistoryMode(result.mode);
-        setHistoryBoothName(result.boothName);
-        setHistoryItems(result.items);
+        const result = await createBoothAssignmentBatch(historyActiveBoothId);
+        setPendingBatchId(result.batchId);
       } catch (error) {
-        if (!cancelled) {
-          setHistoryMode('worker-history');
-          setHistoryBoothName(null);
-          setHistoryItems([]);
-        }
-        console.warn('Booth inbox review fetch failed', error);
+        console.warn('Batch creation failed', error);
       } finally {
-        if (!cancelled) {
-          setIsHistoryLoading(false);
-        }
+        setIsBatchActionLoading(false);
       }
     })();
+  }, [historyActiveBoothId, historyMode, isBatchActionLoading]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [history.length, session.user.id]);
+  const handleApproveAssignmentBatch = useCallback(() => {
+    if (historyMode !== 'leader-inbox' || !pendingBatchId || isBatchActionLoading) {
+      return;
+    }
+
+    setIsBatchActionLoading(true);
+    void (async () => {
+      try {
+        await approveBoothAssignmentBatch(pendingBatchId);
+        setPendingBatchId(null);
+        await refreshHistory();
+      } catch (error) {
+        console.warn('Batch approval failed', error);
+      } finally {
+        setIsBatchActionLoading(false);
+      }
+    })();
+  }, [historyMode, isBatchActionLoading, pendingBatchId, refreshHistory]);
 
   const handleTakePicture = useCallback(async (camera: CameraView | null): Promise<string | null> => {
     if (captureLockRef.current) {
@@ -881,10 +951,15 @@ function ScannerApp({
         case 'history':
           return (
             <HistoryScreen
+              canApproveBatch={Boolean(pendingBatchId)}
+              canCreateBatch={Boolean(historyActiveBoothId && !pendingBatchId)}
               boothName={historyBoothName}
+              isBatchActionLoading={isBatchActionLoading}
               isLoading={isHistoryLoading}
               items={historyItems}
               mode={historyMode}
+              onApproveBatch={handleApproveAssignmentBatch}
+              onCreateBatch={handleCreateAssignmentBatch}
               onOpenCamera={openCamera}
             />
           );
@@ -908,12 +983,17 @@ function ScannerApp({
       dashboardStatus,
       failedCount,
       history,
+      historyActiveBoothId,
       historyBoothName,
       historyItems,
       historyMode,
+      isBatchActionLoading,
       inFlightCount,
       isHistoryLoading,
       onSignOut,
+      pendingBatchId,
+      handleApproveAssignmentBatch,
+      handleCreateAssignmentBatch,
       openCamera,
       openHistory,
       session.user.email
@@ -1253,6 +1333,10 @@ const styles = StyleSheet.create({
     maxWidth: 380,
     padding: 20,
     width: '92%'
+  },
+  batchActions: {
+    flexDirection: 'row',
+    gap: 10
   },
   cameraContainer: {
     flex: 1

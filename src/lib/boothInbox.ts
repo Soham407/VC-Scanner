@@ -47,6 +47,11 @@ type ScannedLeadRow = {
   created_at: string;
 };
 
+type AssignedLeadRow = {
+  assigned_at: string;
+  scanned_leads: ScannedLeadRow | ScannedLeadRow[] | null;
+};
+
 const LEAD_SELECT_FIELDS = [
   'id',
   'booth_id',
@@ -93,6 +98,29 @@ async function loadUserHistory(userId: string): Promise<BoothInboxItem[]> {
   return ((data ?? []) as unknown as ScannedLeadRow[]).map(mapLeadRow);
 }
 
+async function loadWorkerAssignedWork(
+  userId: string,
+  activeBoothId: string
+): Promise<BoothInboxItem[]> {
+  const { data, error } = await supabase
+    .from('lead_assignments')
+    .select(`assigned_at, scanned_leads!inner(${LEAD_SELECT_FIELDS})`)
+    .eq('assigned_to_user_id', userId)
+    .eq('booth_id', activeBoothId)
+    .order('assigned_at', { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  return ((data ?? []) as unknown as AssignedLeadRow[])
+    .map((row) => {
+      const lead = Array.isArray(row.scanned_leads) ? row.scanned_leads[0] : row.scanned_leads;
+      return lead ? mapLeadRow(lead) : null;
+    })
+    .filter((item): item is BoothInboxItem => Boolean(item));
+}
+
 export async function loadBoothInboxReview(userId: string): Promise<BoothInboxReview> {
   const { data: activeBoothData, error: activeBoothError } = await supabase
     .from('user_booth_contexts')
@@ -130,7 +158,7 @@ export async function loadBoothInboxReview(userId: string): Promise<BoothInboxRe
   const isLeader = booth?.created_by === userId;
 
   if (!isLeader) {
-    const items = await loadUserHistory(userId);
+    const items = await loadWorkerAssignedWork(userId, activeBoothId);
 
     return {
       activeBoothId,
@@ -142,8 +170,9 @@ export async function loadBoothInboxReview(userId: string): Promise<BoothInboxRe
 
   const { data: inboxData, error: inboxError } = await supabase
     .from('scanned_leads')
-    .select(LEAD_SELECT_FIELDS)
+    .select(`${LEAD_SELECT_FIELDS}, lead_assignments!left(scanned_lead_id)`)
     .eq('booth_id', activeBoothId)
+    .is('lead_assignments.scanned_lead_id', null)
     .order('created_at', { ascending: false });
 
   if (inboxError) {
