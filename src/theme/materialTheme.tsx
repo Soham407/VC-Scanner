@@ -11,7 +11,7 @@ import {
   useTheme
 } from 'react-native-paper';
 
-const BRAND_SOURCE_COLOR = '#256C5A';
+const BRAND_SOURCE_COLOR = '#9A4B36';
 const COLOR_MODE_STORAGE_KEY = 'vs-scanner:color-mode';
 
 export type ColorMode = 'dark' | 'light';
@@ -33,12 +33,56 @@ type AppPaperTheme = MD3Theme & {
 
 function buildPaperTheme(colorMode: ColorMode, colors: Material3Scheme): AppPaperTheme {
   const baseTheme = colorMode === 'dark' ? MD3DarkTheme : MD3LightTheme;
+  const prototypeColors = colorMode === 'dark'
+    ? {
+        background: '#191512',
+        error: '#FFB4AB',
+        errorContainer: '#93000A',
+        onErrorContainer: '#FFDAD6',
+        onPrimary: '#FFFFFF',
+        onPrimaryContainer: '#FFEDE7',
+        onSecondaryContainer: '#F6E7E0',
+        onSurface: '#F4EEE9',
+        onSurfaceVariant: '#CDBEB7',
+        primary: '#D88B72',
+        primaryContainer: '#733522',
+        secondary: '#CFA092',
+        secondaryContainer: '#4A2B23',
+        surface: '#1F1A17',
+        surfaceContainer: '#27211D',
+        surfaceContainerHigh: '#2E2722',
+        surfaceContainerHighest: '#38302A',
+        tertiary: '#D9B76E',
+        tertiaryContainer: '#4F3E13'
+      }
+    : {
+        background: '#F8F3EA',
+        error: '#BA1A1A',
+        errorContainer: '#FFDAD6',
+        onErrorContainer: '#410002',
+        onPrimary: '#FFFFFF',
+        onPrimaryContainer: '#3B1106',
+        onSecondaryContainer: '#2E150F',
+        onSurface: '#30251F',
+        onSurfaceVariant: '#75645C',
+        primary: '#9A4B36',
+        primaryContainer: '#FFE0D4',
+        secondary: '#76574D',
+        secondaryContainer: '#F6DED6',
+        surface: '#FFF9F3',
+        surfaceContainer: '#FFF9F3',
+        surfaceContainerHigh: '#FBF2EA',
+        surfaceContainerHighest: '#F0E6DD',
+        tertiary: '#77601E',
+        tertiaryContainer: '#F9E49A'
+      };
 
   return {
     ...baseTheme,
     colors: {
       ...baseTheme.colors,
-      ...colors
+      ...colors,
+      ...prototypeColors
     },
     roundness: 3
   } as AppPaperTheme;

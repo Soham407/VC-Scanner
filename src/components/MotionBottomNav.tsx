@@ -40,7 +40,7 @@ export function MotionBottomNav<T extends string>({
       style={[
         styles.bar,
         {
-          backgroundColor: theme.colors.surfaceContainer,
+          backgroundColor: theme.colors.background,
           paddingBottom: Math.max(bottomInset, 8)
         }
       ]}
@@ -96,12 +96,12 @@ function MotionBottomNavItem<T extends string>({
             style={[
               styles.iconPill,
               active && {
-                backgroundColor: theme.colors.secondaryContainer
+                backgroundColor: theme.colors.onSurface
               }
             ]}
           >
             <MaterialCommunityIcons
-              color={active ? theme.colors.onSecondaryContainer : theme.colors.onSurfaceVariant}
+              color={active ? theme.colors.surface : theme.colors.onSurfaceVariant}
               name={(active ? route.focusedIcon : route.unfocusedIcon) as keyof typeof MaterialCommunityIcons.glyphMap}
               size={24}
             />
@@ -109,7 +109,7 @@ function MotionBottomNavItem<T extends string>({
           <Text
             numberOfLines={1}
             style={{
-              color: active ? theme.colors.onSurface : theme.colors.onSurfaceVariant
+              color: active ? theme.colors.primary : theme.colors.onSurfaceVariant
             }}
             variant="labelMedium"
           >
@@ -124,8 +124,8 @@ function MotionBottomNavItem<T extends string>({
 const styles = StyleSheet.create({
   bar: {
     alignItems: 'center',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    borderTopColor: 'rgba(127, 127, 127, 0.22)',
+    borderTopWidth: StyleSheet.hairlineWidth,
     bottom: 0,
     flexDirection: 'row',
     gap: 4,
@@ -138,9 +138,9 @@ const styles = StyleSheet.create({
   iconPill: {
     alignItems: 'center',
     borderRadius: 999,
-    height: 32,
+    height: 30,
     justifyContent: 'center',
-    minWidth: 64
+    minWidth: 52
   },
   item: {
     flex: 1

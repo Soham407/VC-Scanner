@@ -90,7 +90,7 @@ export function RecentScanCard({
 const styles = StyleSheet.create({
   card: {
     alignItems: 'center',
-    borderRadius: 20,
+    borderRadius: 8,
     flexDirection: 'row',
     gap: 12,
     padding: 12
@@ -107,7 +107,7 @@ const styles = StyleSheet.create({
     alignSelf: 'stretch'
   },
   thumb: {
-    borderRadius: 14,
+    borderRadius: 8,
     height: 60,
     width: 60
   }

@@ -1,6 +1,6 @@
-create table if not exists public.booth_assignment_batches (
+create table if not exists public.team_assignment_batches (
   id uuid primary key default gen_random_uuid(),
-  booth_id uuid not null references public.booths(id) on delete cascade,
+  team_id uuid not null references public.teams(id) on delete cascade,
   created_by uuid not null references auth.users(id) on delete cascade,
   status text not null default 'pending' check (status in ('pending', 'approved')),
   scan_count integer not null default 0 check (scan_count >= 0),
@@ -8,12 +8,12 @@ create table if not exists public.booth_assignment_batches (
   approved_at timestamptz
 );
 
-create unique index if not exists booth_assignment_batches_pending_unique_idx
-  on public.booth_assignment_batches(booth_id)
+create unique index if not exists team_assignment_batches_pending_unique_idx
+  on public.team_assignment_batches(team_id)
   where status = 'pending';
 
-create table if not exists public.booth_assignment_batch_items (
-  batch_id uuid not null references public.booth_assignment_batches(id) on delete cascade,
+create table if not exists public.team_assignment_batch_items (
+  batch_id uuid not null references public.team_assignment_batches(id) on delete cascade,
   scanned_lead_id uuid not null references public.scanned_leads(id) on delete cascade,
   created_at timestamptz not null default now(),
   primary key (batch_id, scanned_lead_id),
@@ -22,57 +22,57 @@ create table if not exists public.booth_assignment_batch_items (
 
 create table if not exists public.lead_assignments (
   scanned_lead_id uuid primary key references public.scanned_leads(id) on delete cascade,
-  booth_id uuid not null references public.booths(id) on delete cascade,
+  team_id uuid not null references public.teams(id) on delete cascade,
   assigned_to_user_id uuid not null references auth.users(id) on delete cascade,
   assigned_by_user_id uuid not null references auth.users(id) on delete cascade,
-  batch_id uuid references public.booth_assignment_batches(id) on delete set null,
+  batch_id uuid references public.team_assignment_batches(id) on delete set null,
   assignment_state text not null default 'assigned' check (assignment_state in ('assigned', 'done', 'needs_review')),
   assigned_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
 
 create index if not exists lead_assignments_assigned_to_idx
-  on public.lead_assignments(assigned_to_user_id, booth_id, assignment_state, assigned_at desc);
+  on public.lead_assignments(assigned_to_user_id, team_id, assignment_state, assigned_at desc);
 
 create index if not exists lead_assignments_batch_idx
   on public.lead_assignments(batch_id);
 
-create table if not exists public.booth_assignment_cursors (
-  booth_id uuid primary key references public.booths(id) on delete cascade,
+create table if not exists public.team_assignment_cursors (
+  team_id uuid primary key references public.teams(id) on delete cascade,
   next_worker_index integer not null default 0,
   updated_at timestamptz not null default now()
 );
 
-alter table public.booth_assignment_batches enable row level security;
-alter table public.booth_assignment_batch_items enable row level security;
+alter table public.team_assignment_batches enable row level security;
+alter table public.team_assignment_batch_items enable row level security;
 alter table public.lead_assignments enable row level security;
-alter table public.booth_assignment_cursors enable row level security;
+alter table public.team_assignment_cursors enable row level security;
 
-drop policy if exists "booth_assignment_batches_select_member" on public.booth_assignment_batches;
-create policy "booth_assignment_batches_select_member"
-on public.booth_assignment_batches
+drop policy if exists "team_assignment_batches_select_member" on public.team_assignment_batches;
+create policy "team_assignment_batches_select_member"
+on public.team_assignment_batches
 for select
 to authenticated
 using (
   exists (
     select 1
-    from public.booth_memberships memberships
-    where memberships.booth_id = booth_assignment_batches.booth_id
+    from public.team_memberships memberships
+    where memberships.team_id = team_assignment_batches.team_id
       and memberships.user_id = auth.uid()
   )
 );
 
-drop policy if exists "booth_assignment_batch_items_select_member" on public.booth_assignment_batch_items;
-create policy "booth_assignment_batch_items_select_member"
-on public.booth_assignment_batch_items
+drop policy if exists "team_assignment_batch_items_select_member" on public.team_assignment_batch_items;
+create policy "team_assignment_batch_items_select_member"
+on public.team_assignment_batch_items
 for select
 to authenticated
 using (
   exists (
     select 1
-    from public.booth_assignment_batches batches
-    join public.booth_memberships memberships on memberships.booth_id = batches.booth_id
-    where batches.id = booth_assignment_batch_items.batch_id
+    from public.team_assignment_batches batches
+    join public.team_memberships memberships on memberships.team_id = batches.team_id
+    where batches.id = team_assignment_batch_items.batch_id
       and memberships.user_id = auth.uid()
   )
 );
@@ -86,9 +86,9 @@ using (
   assigned_to_user_id = auth.uid()
   or exists (
     select 1
-    from public.booths booths
-    where booths.id = lead_assignments.booth_id
-      and booths.created_by = auth.uid()
+    from public.teams teams
+    where teams.id = lead_assignments.team_id
+      and teams.created_by = auth.uid()
   )
 );
 
@@ -109,9 +109,9 @@ using (
   auth.uid() = user_id
   or exists (
     select 1
-    from public.booths booths
-    where booths.id = scanned_leads.booth_id
-      and booths.created_by = auth.uid()
+    from public.teams teams
+    where teams.id = scanned_leads.team_id
+      and teams.created_by = auth.uid()
   )
   or exists (
     select 1
@@ -121,7 +121,7 @@ using (
   )
 );
 
-create or replace function public.create_booth_assignment_batch(target_booth_id uuid)
+create or replace function public.create_team_assignment_batch(target_team_id uuid)
 returns table(batch_id uuid, scan_count integer)
 language plpgsql
 security definer
@@ -140,17 +140,17 @@ begin
 
   if not exists (
     select 1
-    from public.booths
-    where booths.id = target_booth_id
-      and booths.created_by = current_user_id
+    from public.teams
+    where teams.id = target_team_id
+      and teams.created_by = current_user_id
   ) then
-    raise exception 'Only the booth leader can create assignment batches';
+    raise exception 'Only the team leader can create assignment batches';
   end if;
 
   select batches.id, batches.scan_count
   into existing_batch_id, existing_scan_count
-  from public.booth_assignment_batches batches
-  where batches.booth_id = target_booth_id
+  from public.team_assignment_batches batches
+  where batches.team_id = target_team_id
     and batches.status = 'pending'
   order by batches.created_at desc
   limit 1;
@@ -160,14 +160,14 @@ begin
     return;
   end if;
 
-  insert into public.booth_assignment_batches (booth_id, created_by, status)
-  values (target_booth_id, current_user_id, 'pending')
+  insert into public.team_assignment_batches (team_id, created_by, status)
+  values (target_team_id, current_user_id, 'pending')
   returning id into created_batch_id;
 
-  insert into public.booth_assignment_batch_items (batch_id, scanned_lead_id)
+  insert into public.team_assignment_batch_items (batch_id, scanned_lead_id)
   select created_batch_id, leads.id
   from public.scanned_leads leads
-  where leads.booth_id = target_booth_id
+  where leads.team_id = target_team_id
     and not exists (
       select 1
       from public.lead_assignments assignments
@@ -178,12 +178,12 @@ begin
 
   get diagnostics created_scan_count = row_count;
 
-  update public.booth_assignment_batches
+  update public.team_assignment_batches
   set scan_count = created_scan_count
   where id = created_batch_id;
 
   if created_scan_count = 0 then
-    delete from public.booth_assignment_batches
+    delete from public.team_assignment_batches
     where id = created_batch_id;
 
     raise exception 'No unassigned scans available';
@@ -193,10 +193,10 @@ begin
 end;
 $$;
 
-revoke all on function public.create_booth_assignment_batch(uuid) from public;
-grant execute on function public.create_booth_assignment_batch(uuid) to authenticated;
+revoke all on function public.create_team_assignment_batch(uuid) from public;
+grant execute on function public.create_team_assignment_batch(uuid) to authenticated;
 
-create or replace function public.approve_booth_assignment_batch(target_batch_id uuid)
+create or replace function public.approve_team_assignment_batch(target_batch_id uuid)
 returns table(assigned_count integer)
 language plpgsql
 security definer
@@ -204,7 +204,7 @@ set search_path = public, auth
 as $$
 declare
   current_user_id uuid := auth.uid();
-  target_batch public.booth_assignment_batches%rowtype;
+  target_batch public.team_assignment_batches%rowtype;
   worker_count integer := 0;
   start_index integer := 0;
   assigned_total integer := 0;
@@ -219,7 +219,7 @@ begin
 
   select *
   into target_batch
-  from public.booth_assignment_batches batches
+  from public.team_assignment_batches batches
   where batches.id = target_batch_id
   for update;
 
@@ -233,11 +233,11 @@ begin
 
   if not exists (
     select 1
-    from public.booths
-    where booths.id = target_batch.booth_id
-      and booths.created_by = current_user_id
+    from public.teams
+    where teams.id = target_batch.team_id
+      and teams.created_by = current_user_id
   ) then
-    raise exception 'Only the booth leader can approve assignment batches';
+    raise exception 'Only the team leader can approve assignment batches';
   end if;
 
   create temporary table worker_loads_tmp (
@@ -251,18 +251,18 @@ begin
     row_number() over (order by memberships.created_at, memberships.user_id) - 1,
     memberships.user_id,
     coalesce(existing_loads.active_load, 0)
-  from public.booth_memberships memberships
+  from public.team_memberships memberships
   left join (
     select
       assignments.assigned_to_user_id,
       count(*)::integer as active_load
     from public.lead_assignments assignments
-    where assignments.booth_id = target_batch.booth_id
+    where assignments.team_id = target_batch.team_id
       and assignments.assignment_state in ('assigned', 'needs_review')
     group by assignments.assigned_to_user_id
   ) existing_loads
     on existing_loads.assigned_to_user_id = memberships.user_id
-  where memberships.booth_id = target_batch.booth_id
+  where memberships.team_id = target_batch.team_id
     and memberships.user_id <> target_batch.created_by
   order by memberships.created_at, memberships.user_id;
 
@@ -275,15 +275,15 @@ begin
 
   select assignment_cursor.next_worker_index
   into start_index
-  from public.booth_assignment_cursors assignment_cursor
-  where assignment_cursor.booth_id = target_batch.booth_id
+  from public.team_assignment_cursors assignment_cursor
+  where assignment_cursor.team_id = target_batch.team_id
   for update;
 
   start_index := coalesce(start_index, 0);
 
   for current_lead_id in
     select items.scanned_lead_id
-    from public.booth_assignment_batch_items items
+    from public.team_assignment_batch_items items
     left join public.lead_assignments existing_assignment
       on existing_assignment.scanned_lead_id = items.scanned_lead_id
     where items.batch_id = target_batch_id
@@ -304,7 +304,7 @@ begin
 
     insert into public.lead_assignments (
       scanned_lead_id,
-      booth_id,
+      team_id,
       assigned_to_user_id,
       assigned_by_user_id,
       batch_id,
@@ -312,7 +312,7 @@ begin
     )
     values (
       current_lead_id,
-      target_batch.booth_id,
+      target_batch.team_id,
       selected_user_id,
       current_user_id,
       target_batch_id,
@@ -330,15 +330,15 @@ begin
     end if;
   end loop;
 
-  update public.booth_assignment_batches
+  update public.team_assignment_batches
   set
     status = 'approved',
     approved_at = now()
   where id = target_batch_id;
 
-  insert into public.booth_assignment_cursors (booth_id, next_worker_index, updated_at)
-  values (target_batch.booth_id, mod(start_index, worker_count), now())
-  on conflict (booth_id) do update
+  insert into public.team_assignment_cursors (team_id, next_worker_index, updated_at)
+  values (target_batch.team_id, mod(start_index, worker_count), now())
+  on conflict (team_id) do update
   set
     next_worker_index = excluded.next_worker_index,
     updated_at = excluded.updated_at;
@@ -347,5 +347,5 @@ begin
 end;
 $$;
 
-revoke all on function public.approve_booth_assignment_batch(uuid) from public;
-grant execute on function public.approve_booth_assignment_batch(uuid) to authenticated;
+revoke all on function public.approve_team_assignment_batch(uuid) from public;
+grant execute on function public.approve_team_assignment_batch(uuid) to authenticated;

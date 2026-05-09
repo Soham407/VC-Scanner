@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, fireEvent, render, screen } from '@testing-library/react-native';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { Alert, Linking, Text, View } from 'react-native';
@@ -15,11 +15,23 @@ const mockEnqueue = jest.fn();
 const mockRetry = jest.fn();
 const mockDrainOnce = jest.fn();
 const mockGarbageCollect = jest.fn();
-const mockGetActiveBoothId = jest.fn();
-const mockListPendingBoothInvitesForEmail = jest.fn();
-const mockRespondToBoothInvite = jest.fn();
-const mockCreateBoothAssignmentBatch = jest.fn();
-const mockApproveBoothAssignmentBatch = jest.fn();
+const mockGetActiveTeamId = jest.fn();
+const mockSetActiveTeamId = jest.fn();
+const mockLoadAccessibleTeams = jest.fn();
+const mockCreateTeam = jest.fn();
+const mockCreateTeamInvite = jest.fn();
+const mockListPendingTeamInvitesForEmail = jest.fn();
+const mockListPendingTeamInvitesForTeam = jest.fn();
+const mockRespondToTeamInvite = jest.fn();
+const mockCreateTeamAssignmentBatch = jest.fn();
+const mockApproveTeamAssignmentBatch = jest.fn();
+const mockLoadPendingTeamAssignmentBatch = jest.fn();
+const mockAddTeamAssignmentBatchItem = jest.fn();
+const mockRemoveTeamAssignmentBatchItem = jest.fn();
+const mockUpdateTeamAssignmentState = jest.fn();
+const mockReassignTeamAssignment = jest.fn();
+const mockLoadTeamMembers = jest.fn();
+const mockPromoteTeamMemberToLeader = jest.fn();
 const mockBottomSheetPresent = jest.fn();
 const mockClearSystemNotice = jest.fn();
 const mockUseNetInfo = jest.fn();
@@ -31,7 +43,7 @@ const mockSignUp = jest.fn();
 const mockSignInWithOAuth = jest.fn();
 const mockExchangeCodeForSession = jest.fn();
 const mockSyncScannerQueueStoreNamespace = jest.fn().mockResolvedValue(undefined);
-const mockLoadBoothInboxReview = jest.fn();
+const mockLoadTeamInboxReview = jest.fn();
 
 const mockSession = {
   user: {
@@ -126,21 +138,38 @@ jest.mock('../src/components/AuthScreen', () => ({
   }
 }));
 
-jest.mock('../src/lib/boothContext', () => ({
-  getActiveBoothId: (...args: unknown[]) => mockGetActiveBoothId(...args)
+jest.mock('../src/lib/teamContext', () => ({
+  getActiveTeamId: (...args: unknown[]) => mockGetActiveTeamId(...args),
+  setActiveTeamId: (...args: unknown[]) => mockSetActiveTeamId(...args)
 }));
 
-jest.mock('../src/lib/boothInbox', () => ({
-  loadBoothInboxReview: (...args: unknown[]) => mockLoadBoothInboxReview(...args)
+jest.mock('../src/lib/teams', () => ({
+  createTeam: (...args: unknown[]) => mockCreateTeam(...args),
+  loadAccessibleTeams: (...args: unknown[]) => mockLoadAccessibleTeams(...args)
 }));
 
-jest.mock('../src/lib/boothInvites', () => ({
-  listPendingBoothInvitesForEmail: (...args: unknown[]) => mockListPendingBoothInvitesForEmail(...args),
-  respondToBoothInvite: (...args: unknown[]) => mockRespondToBoothInvite(...args)
+jest.mock('../src/lib/teamInbox', () => ({
+  loadTeamInboxReview: (...args: unknown[]) => mockLoadTeamInboxReview(...args)
 }));
-jest.mock('../src/lib/boothAssignments', () => ({
-  createBoothAssignmentBatch: (...args: unknown[]) => mockCreateBoothAssignmentBatch(...args),
-  approveBoothAssignmentBatch: (...args: unknown[]) => mockApproveBoothAssignmentBatch(...args)
+
+jest.mock('../src/lib/teamInvites', () => ({
+  createTeamInvite: (...args: unknown[]) => mockCreateTeamInvite(...args),
+  listPendingTeamInvitesForEmail: (...args: unknown[]) => mockListPendingTeamInvitesForEmail(...args),
+  listPendingTeamInvitesForTeam: (...args: unknown[]) => mockListPendingTeamInvitesForTeam(...args),
+  respondToTeamInvite: (...args: unknown[]) => mockRespondToTeamInvite(...args)
+}));
+jest.mock('../src/lib/teamAssignments', () => ({
+  addTeamAssignmentBatchItem: (...args: unknown[]) => mockAddTeamAssignmentBatchItem(...args),
+  createTeamAssignmentBatch: (...args: unknown[]) => mockCreateTeamAssignmentBatch(...args),
+  approveTeamAssignmentBatch: (...args: unknown[]) => mockApproveTeamAssignmentBatch(...args),
+  loadPendingTeamAssignmentBatch: (...args: unknown[]) => mockLoadPendingTeamAssignmentBatch(...args),
+  reassignTeamAssignment: (...args: unknown[]) => mockReassignTeamAssignment(...args),
+  removeTeamAssignmentBatchItem: (...args: unknown[]) => mockRemoveTeamAssignmentBatchItem(...args),
+  updateTeamAssignmentState: (...args: unknown[]) => mockUpdateTeamAssignmentState(...args)
+}));
+jest.mock('../src/lib/teamMembers', () => ({
+  loadTeamMembers: (...args: unknown[]) => mockLoadTeamMembers(...args),
+  promoteTeamMemberToLeader: (...args: unknown[]) => mockPromoteTeamMemberToLeader(...args)
 }));
 
 jest.mock('../lib/ocr', () => {
@@ -191,6 +220,7 @@ jest.mock('@gorhom/bottom-sheet', () => {
   return {
     BottomSheetModal: React.forwardRef((props: { children?: React.ReactNode }, ref: React.Ref<unknown>) => {
       React.useImperativeHandle(ref, () => ({
+        dismiss: jest.fn(),
         present: mockBottomSheetPresent
       }));
 
@@ -253,16 +283,45 @@ describe('App permissions flow', () => {
     mockUseNetInfo.mockReturnValue({ isConnected: true });
     mockGarbageCollect.mockResolvedValue(undefined);
     mockDrainOnce.mockResolvedValue(undefined);
-    mockGetActiveBoothId.mockResolvedValue(null);
-    mockListPendingBoothInvitesForEmail.mockResolvedValue([]);
-    mockRespondToBoothInvite.mockResolvedValue(undefined);
-    mockCreateBoothAssignmentBatch.mockResolvedValue({
+    mockGetActiveTeamId.mockResolvedValue(null);
+    mockSetActiveTeamId.mockResolvedValue(undefined);
+    mockLoadAccessibleTeams.mockResolvedValue([]);
+    mockCreateTeam.mockResolvedValue({
+      createdAt: '2026-05-04T10:00:00Z',
+      createdBy: 'user-1',
+      id: 'team-1',
+      name: 'Main Team'
+    });
+    mockCreateTeamInvite.mockResolvedValue({
+      teamId: 'team-1',
+      createdAt: '2026-05-04T10:00:00Z',
+      id: 'invite-1',
+      invitedEmail: 'worker@example.com',
+      status: 'pending'
+    });
+    mockLoadTeamMembers.mockResolvedValue([
+      {
+        createdAt: '2026-05-04T10:00:00Z',
+        email: 'user@example.com',
+        isLeader: true,
+        userId: 'user-1'
+      }
+    ]);
+    mockPromoteTeamMemberToLeader.mockResolvedValue(undefined);
+    mockUpdateTeamAssignmentState.mockResolvedValue(undefined);
+    mockListPendingTeamInvitesForEmail.mockResolvedValue([]);
+    mockListPendingTeamInvitesForTeam.mockResolvedValue([]);
+    mockRespondToTeamInvite.mockResolvedValue(undefined);
+    mockCreateTeamAssignmentBatch.mockResolvedValue({
       batchId: 'batch-1',
       scanCount: 2
     });
-    mockApproveBoothAssignmentBatch.mockResolvedValue({
+    mockApproveTeamAssignmentBatch.mockResolvedValue({
       assignedCount: 2
     });
+    mockLoadPendingTeamAssignmentBatch.mockResolvedValue(null);
+    mockAddTeamAssignmentBatchItem.mockResolvedValue(undefined);
+    mockRemoveTeamAssignmentBatchItem.mockResolvedValue(undefined);
     mockGetSession.mockResolvedValue({ data: { session: mockSession }, error: null });
     mockOnAuthStateChange.mockReturnValue({
       data: {
@@ -273,12 +332,13 @@ describe('App permissions flow', () => {
     });
     mockPrepareImage.mockResolvedValue({ cachePath: 'file:///cache/lead-5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg' });
     mockExtractText.mockResolvedValue('John Doe\nAcme Corp\nSales Manager');
-    mockLoadBoothInboxReview.mockResolvedValue({
-      activeBoothId: null,
-      boothName: null,
+    mockLoadTeamInboxReview.mockResolvedValue({
+      activeTeamId: null,
+      teamName: null,
       items: [],
       mode: 'worker-history'
     });
+    mockReassignTeamAssignment.mockResolvedValue(undefined);
     await AsyncStorage.clear();
   });
 
@@ -302,11 +362,11 @@ describe('App permissions flow', () => {
 
   it('shows a blocking pending-invite gate for signed-in users and resolves on accept', async () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
-    mockListPendingBoothInvitesForEmail.mockResolvedValue([
+    mockListPendingTeamInvitesForEmail.mockResolvedValue([
       {
         id: 'invite-1',
-        boothId: 'booth-1',
-        boothName: 'Main Booth',
+        teamId: 'team-1',
+        teamName: 'Main Team',
         createdAt: '2026-05-02T11:00:00.000Z',
         invitedEmail: 'user@example.com'
       }
@@ -314,17 +374,18 @@ describe('App permissions flow', () => {
 
     await renderAppReady();
 
-    expect(screen.getByText('Booth invite pending')).toBeTruthy();
+    expect(screen.getByText('Team invite pending')).toBeTruthy();
     expect(screen.queryAllByText('Dashboard')).toHaveLength(0);
 
-    fireEvent.press(screen.getByTestId('accept-booth-invite-button'));
+    fireEvent.press(screen.getByTestId('accept-team-invite-button'));
 
     await act(async () => {
       await Promise.resolve();
     });
 
-    expect(mockRespondToBoothInvite).toHaveBeenCalledWith('invite-1', 'accept');
-    expect(screen.queryByText('Booth invite pending')).toBeNull();
+    expect(mockRespondToTeamInvite).toHaveBeenCalledWith('invite-1', 'accept');
+    expect(mockSetActiveTeamId).toHaveBeenCalledWith('team-1');
+    expect(screen.queryByText('Team invite pending')).toBeNull();
     expect(screen.getAllByText('Dashboard').length).toBeGreaterThan(0);
   });
 
@@ -387,15 +448,58 @@ describe('App permissions flow', () => {
     expect(screen.getByTestId('history-button')).toBeTruthy();
   });
 
-  it('renders the booth inbox for leader review mode', async () => {
+  it('auto-selects the first accessible team and lets the user switch teams from team', async () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
-    mockLoadBoothInboxReview.mockResolvedValue({
-      activeBoothId: 'booth-1',
-      boothName: 'North Hall',
+    mockLoadAccessibleTeams.mockResolvedValue([
+      {
+        createdAt: '2026-05-01T08:00:00Z',
+        createdBy: 'leader-1',
+        id: 'team-1',
+        name: 'North Hall'
+      },
+      {
+        createdAt: '2026-05-01T09:00:00Z',
+        createdBy: 'leader-1',
+        id: 'team-2',
+        name: 'South Hall'
+      }
+    ]);
+
+    await renderAppReady();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockSetActiveTeamId).toHaveBeenCalledWith('team-1');
+
+    fireEvent.press(screen.getByText('Team'));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText('North Hall')).toBeTruthy();
+    expect(screen.getByText('South Hall')).toBeTruthy();
+
+    fireEvent.press(screen.getAllByText('Make active')[0]);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockSetActiveTeamId).toHaveBeenCalledWith('team-2');
+  });
+
+  it('renders the team inbox for leader review mode', async () => {
+    mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+    mockLoadTeamInboxReview.mockResolvedValue({
+      activeTeamId: 'team-1',
+      teamName: 'North Hall',
       mode: 'leader-inbox',
       items: [
         {
-          boothId: 'booth-1',
+          teamId: 'team-1',
           capturedByUserId: 'worker-2',
           companyName: 'Acme',
           createdAt: '2026-05-01T12:00:00Z',
@@ -419,20 +523,32 @@ describe('App permissions flow', () => {
       await Promise.resolve();
     });
 
-    expect(screen.getByText('Booth inbox')).toBeTruthy();
+    expect(screen.getByText('Team Inbox')).toBeTruthy();
     expect(screen.getByText('North Hall')).toBeTruthy();
-    expect(screen.getByText('Ada Lovelace')).toBeTruthy();
+    expect(screen.getAllByText('Ada Lovelace').length).toBeGreaterThan(0);
   });
 
-  it('lets a leader create and approve a batch from the booth inbox', async () => {
+  it('lets a leader create and approve a batch from the team inbox', async () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
-    mockLoadBoothInboxReview.mockResolvedValue({
-      activeBoothId: 'booth-1',
-      boothName: 'North Hall',
+    mockLoadPendingTeamAssignmentBatch
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        batchId: 'batch-7',
+        scanCount: 1,
+        items: [
+          {
+            createdAt: '2026-05-04T10:00:00Z',
+            scannedLeadId: 'lead-2'
+          }
+        ]
+      });
+    mockLoadTeamInboxReview.mockResolvedValue({
+      activeTeamId: 'team-1',
+      teamName: 'North Hall',
       mode: 'leader-inbox',
       items: [
         {
-          boothId: 'booth-1',
+          teamId: 'team-1',
           capturedByUserId: 'worker-2',
           companyName: 'Acme',
           createdAt: '2026-05-01T12:00:00Z',
@@ -447,7 +563,7 @@ describe('App permissions flow', () => {
         }
       ]
     });
-    mockCreateBoothAssignmentBatch.mockResolvedValue({
+    mockCreateTeamAssignmentBatch.mockResolvedValue({
       batchId: 'batch-7',
       scanCount: 1
     });
@@ -466,7 +582,7 @@ describe('App permissions flow', () => {
       await Promise.resolve();
     });
 
-    expect(mockCreateBoothAssignmentBatch).toHaveBeenCalledWith('booth-1');
+    expect(mockCreateTeamAssignmentBatch).toHaveBeenCalledWith('team-1');
 
     fireEvent.press(screen.getByTestId('approve-assignment-batch-button'));
 
@@ -474,18 +590,190 @@ describe('App permissions flow', () => {
       await Promise.resolve();
     });
 
-    expect(mockApproveBoothAssignmentBatch).toHaveBeenCalledWith('batch-7');
+    expect(screen.getByText('Create 1 Assignments?')).toBeTruthy();
+    fireEvent.press(screen.getByTestId('confirm-approve-assignment-batch-button'));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockApproveTeamAssignmentBatch).toHaveBeenCalledWith('batch-7');
+  });
+
+  it('lets a leader edit the pending batch from the team inbox', async () => {
+    mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+    mockLoadPendingTeamAssignmentBatch.mockResolvedValue({
+      batchId: 'batch-7',
+      scanCount: 1,
+      items: [
+        {
+          createdAt: '2026-05-04T10:00:00Z',
+          scannedLeadId: 'lead-2'
+        }
+      ]
+    });
+    mockLoadTeamInboxReview.mockResolvedValue({
+      activeTeamId: 'team-1',
+      teamName: 'North Hall',
+      mode: 'leader-inbox',
+      items: [
+        {
+          teamId: 'team-1',
+          capturedByUserId: 'worker-2',
+          companyName: 'Acme',
+          createdAt: '2026-05-01T12:00:00Z',
+          email: 'ada@example.com',
+          fullName: 'Ada Lovelace',
+          id: 'lead-2',
+          imagePath: 'worker-2/lead-2.jpg',
+          jobTitle: 'Engineer',
+          parseStatus: 'parsed',
+          phoneNumber: null,
+          rawText: 'Ada'
+        },
+        {
+          teamId: 'team-1',
+          capturedByUserId: 'worker-3',
+          companyName: 'Beta',
+          createdAt: '2026-05-01T12:10:00Z',
+          email: 'grace@example.com',
+          fullName: 'Grace Hopper',
+          id: 'lead-3',
+          imagePath: 'worker-3/lead-3.jpg',
+          jobTitle: 'Captain',
+          parseStatus: 'parsed',
+          phoneNumber: null,
+          rawText: 'Grace'
+        }
+      ]
+    });
+    mockLoadPendingTeamAssignmentBatch.mockResolvedValue({
+      batchId: 'batch-7',
+      scanCount: 1,
+      items: [
+        {
+          createdAt: '2026-05-04T10:00:00Z',
+          scannedLeadId: 'lead-2'
+        }
+      ]
+    });
+
+    await renderAppReady();
+
+    fireEvent.press(screen.getAllByText('History')[0]);
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    fireEvent.press(screen.getByTestId('edit-assignment-batch-button'));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    fireEvent.press(screen.getByTestId('remove-batch-item-lead-2'));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    fireEvent.press(screen.getByTestId('add-batch-item-lead-3'));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockBottomSheetPresent).toHaveBeenCalledTimes(1);
+    expect(mockRemoveTeamAssignmentBatchItem).toHaveBeenCalledWith('batch-7', 'lead-2');
+    expect(mockAddTeamAssignmentBatchItem).toHaveBeenCalledWith('batch-7', 'lead-3');
+  });
+
+  it('lets a leader reassign an assigned scan from the team inbox', async () => {
+    mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+    mockGetActiveTeamId.mockResolvedValue('team-1');
+    mockLoadAccessibleTeams.mockResolvedValue([
+      {
+        createdAt: '2026-05-04T10:00:00Z',
+        createdBy: 'leader-1',
+        id: 'team-1',
+        name: 'North Hall'
+      }
+    ]);
+    mockLoadTeamInboxReview.mockResolvedValue({
+      activeTeamId: 'team-1',
+      teamName: 'North Hall',
+      mode: 'leader-inbox',
+      items: [
+        {
+          assignedAt: '2026-05-04T10:00:00Z',
+          assignedToUserId: 'worker-2',
+          assignmentState: 'assigned',
+          teamId: 'team-1',
+          capturedByUserId: 'worker-2',
+          companyName: 'Acme',
+          createdAt: '2026-05-01T12:00:00Z',
+          email: 'ada@example.com',
+          fullName: 'Ada Lovelace',
+          id: 'lead-2',
+          imagePath: 'worker-2/lead-2.jpg',
+          jobTitle: 'Engineer',
+          parseStatus: 'parsed',
+          phoneNumber: null,
+          rawText: 'Ada'
+        }
+      ]
+    });
+    mockLoadTeamMembers.mockResolvedValue([
+      {
+        createdAt: '2026-05-04T10:00:00Z',
+        email: 'user@example.com',
+        isLeader: true,
+        userId: 'user-1'
+      },
+      {
+        createdAt: '2026-05-04T10:01:00Z',
+        email: 'worker@example.com',
+        isLeader: false,
+        userId: 'worker-3'
+      }
+    ]);
+    mockLoadPendingTeamAssignmentBatch.mockResolvedValue(null);
+
+    await renderAppReady();
+
+    fireEvent.press(screen.getAllByText('History')[0]);
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    fireEvent.press(screen.getByText('Reassign'));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    fireEvent.press(screen.getByTestId('reassign-lead-2-worker-3'));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockReassignTeamAssignment).toHaveBeenCalledWith('lead-2', 'worker-3');
   });
 
   it('renders worker-scoped history copy for non-leader mode', async () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
-    mockLoadBoothInboxReview.mockResolvedValue({
-      activeBoothId: 'booth-1',
-      boothName: 'North Hall',
+    mockLoadTeamInboxReview.mockResolvedValue({
+      activeTeamId: 'team-1',
+      teamName: 'North Hall',
       mode: 'worker-history',
       items: [
         {
-          boothId: 'booth-1',
+          teamId: 'team-1',
           capturedByUserId: 'worker-2',
           companyName: 'Acme',
           createdAt: '2026-05-01T12:00:00Z',
@@ -509,8 +797,8 @@ describe('App permissions flow', () => {
       await Promise.resolve();
     });
 
-    expect(screen.getByText('My follow-up work')).toBeTruthy();
-    expect(screen.queryByText('Booth inbox')).toBeNull();
+    expect(screen.getByText('Assignments')).toBeTruthy();
+    expect(screen.queryByText('Team Inbox')).toBeNull();
     expect(screen.queryByText('Captured by worker-2')).toBeNull();
   });
 
@@ -536,6 +824,138 @@ describe('App permissions flow', () => {
     expect(screen.getByText(initialMode === 'Dark' ? 'Light' : 'Dark')).toBeTruthy();
   });
 
+  it('creates a team from the team page and then reveals invite and current team sections', async () => {
+    mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+    mockCreateTeam.mockResolvedValueOnce({
+      createdAt: '2026-05-04T10:00:00Z',
+      createdBy: 'user-1',
+      id: 'team-9',
+      name: 'North Hall'
+    });
+    mockLoadAccessibleTeams.mockResolvedValueOnce([]);
+    mockLoadAccessibleTeams.mockResolvedValueOnce([
+      {
+        createdAt: '2026-05-04T10:00:00Z',
+        createdBy: 'user-1',
+        id: 'team-9',
+        name: 'North Hall'
+      }
+    ]);
+
+    await renderAppReady();
+
+    fireEvent.press(screen.getByText('Team'));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText('Active Team')).toBeNull();
+    expect(screen.queryByText('Pending Invite')).toBeNull();
+
+    fireEvent.changeText(screen.getByTestId('team-name-input'), 'North Hall');
+    fireEvent.press(screen.getByTestId('create-team-button'));
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockCreateTeam).toHaveBeenCalledWith('North Hall');
+    expect(mockSetActiveTeamId).toHaveBeenCalledWith('team-9');
+    await waitFor(() => {
+      expect(screen.getByText('Active Team')).toBeTruthy();
+    });
+    await waitFor(() => {
+      expect(screen.getByText('Pending Invite')).toBeTruthy();
+    });
+    expect(screen.queryByText('Switch Team')).toBeNull();
+  });
+
+  it('sends a team invite from the team page', async () => {
+    mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+    mockLoadAccessibleTeams.mockResolvedValue([
+      {
+        createdAt: '2026-05-04T10:00:00Z',
+        createdBy: 'user-1',
+        id: 'team-1',
+        name: 'Main Team'
+      }
+    ]);
+    mockLoadTeamMembers.mockResolvedValue([
+      {
+        createdAt: '2026-05-04T10:00:00Z',
+        email: 'user@example.com',
+        isLeader: true,
+        userId: 'user-1'
+      }
+    ]);
+
+    await renderAppReady();
+
+    fireEvent.press(screen.getByText('Team'));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText('Pending Invite')).toBeTruthy();
+    fireEvent.changeText(screen.getByTestId('invite-email-input'), 'worker@example.com');
+    fireEvent.press(screen.getByTestId('create-invite-button'));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockCreateTeamInvite).toHaveBeenCalledWith({
+      teamId: 'team-1',
+      invitedEmail: 'worker@example.com'
+    });
+  });
+
+  it('updates assignment state from the worker history rows', async () => {
+    mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+    mockLoadTeamInboxReview.mockResolvedValue({
+      activeTeamId: 'team-1',
+      teamName: 'North Hall',
+      mode: 'worker-history',
+      items: [
+        {
+          assignedAt: '2026-05-04T10:00:00Z',
+          assignmentState: 'assigned',
+          teamId: 'team-1',
+          capturedByUserId: 'worker-2',
+          companyName: 'Acme',
+          createdAt: '2026-05-01T12:00:00Z',
+          email: 'ada@example.com',
+          fullName: 'Ada Lovelace',
+          id: 'lead-2',
+          imagePath: 'worker-2/lead-2.jpg',
+          jobTitle: 'Engineer',
+          parseStatus: 'parsed',
+          phoneNumber: null,
+          rawText: 'Ada'
+        }
+      ]
+    });
+
+    await renderAppReady();
+
+    fireEvent.press(screen.getAllByText('History')[0]);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    fireEvent.press(screen.getByText('Done'));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockUpdateTeamAssignmentState).toHaveBeenCalledWith('lead-2', 'done');
+  });
+
   it('renders a snackbar when a system notice exists', async () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
     mockSystemNotice = {
@@ -553,7 +973,7 @@ describe('App permissions flow', () => {
 
   it('renders a dev gallery picker button and routes selected image through capture pipeline', async () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
-    mockGetActiveBoothId.mockResolvedValue('booth-77');
+    mockGetActiveTeamId.mockResolvedValue('team-77');
     (ImagePicker.launchImageLibraryAsync as jest.Mock).mockResolvedValue({
       assets: [{ uri: 'file:///tmp/gallery-card.jpg' }],
       canceled: false
@@ -582,8 +1002,16 @@ describe('App permissions flow', () => {
     });
     expect(mockPrepareImage).toHaveBeenCalledWith('file:///tmp/gallery-card.jpg', leadId);
     expect(mockExtractText).toHaveBeenCalledWith('file:///cache/lead-5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg');
+    expect(screen.getByText('Review scan')).toBeTruthy();
+
+    fireEvent.press(screen.getByTestId('save-ocr-review-button'));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
     expect(mockEnqueue).toHaveBeenCalledWith({
-      boothId: 'booth-77',
+      teamId: 'team-77',
       id: leadId,
       imagePath: 'file:///cache/lead-5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg',
       rawText: 'John Doe\nAcme Corp\nSales Manager'
@@ -640,13 +1068,13 @@ describe('App permissions flow', () => {
       await Promise.resolve();
     });
 
-    expect(screen.getByTestId('capture-button').props.accessibilityState?.disabled).toBe(false);
+    expect(screen.getByText('Review scan')).toBeTruthy();
   });
 
-  it('runs prepare -> OCR -> enqueue and returns to viewfinder without spinner', async () => {
+  it('runs prepare -> OCR -> review -> enqueue without spinner', async () => {
     const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(jest.fn());
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
-    mockGetActiveBoothId.mockResolvedValue('booth-99');
+    mockGetActiveTeamId.mockResolvedValue('team-99');
     mockTakePictureAsync.mockResolvedValue({
       height: 100,
       uri: 'file:///tmp/card.jpg',
@@ -673,23 +1101,32 @@ describe('App permissions flow', () => {
 
     expect(mockPrepareImage).toHaveBeenCalledWith('file:///tmp/card.jpg', leadId);
     expect(mockExtractText).toHaveBeenCalledWith('file:///cache/lead-5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg');
+    expect(screen.getByText('Review scan')).toBeTruthy();
+    expect(mockEnqueue).not.toHaveBeenCalled();
+
+    fireEvent.press(screen.getByTestId('save-ocr-review-button'));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
     expect(mockEnqueue).toHaveBeenCalledWith({
-      boothId: 'booth-99',
+      teamId: 'team-99',
       id: leadId,
       imagePath: 'file:///cache/lead-5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg',
       rawText: 'John Doe\nAcme Corp\nSales Manager'
     });
     expect(screen.queryByTestId('pipeline-spinner')).toBeNull();
     expect(screen.queryByTestId('capture-preview')).toBeNull();
-    expect(screen.getByTestId('camera-viewfinder')).toBeTruthy();
+    expect(screen.queryByText('Review scan')).toBeNull();
     expect(alertSpy).not.toHaveBeenCalled();
   });
 
-  it('continues capture routing without booth context when active booth lookup fails', async () => {
+  it('continues capture routing without team context when active team lookup fails', async () => {
     const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(jest.fn());
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(jest.fn());
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
-    mockGetActiveBoothId.mockRejectedValue(new Error('context lookup failed'));
+    mockGetActiveTeamId.mockRejectedValue(new Error('context lookup failed'));
     mockTakePictureAsync.mockResolvedValue({
       height: 100,
       uri: 'file:///tmp/card.jpg',
@@ -714,15 +1151,21 @@ describe('App permissions flow', () => {
       await Promise.resolve();
     });
 
+    fireEvent.press(screen.getByTestId('save-ocr-review-button'));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
     expect(mockEnqueue).toHaveBeenCalledWith({
-      boothId: null,
+      teamId: null,
       id: leadId,
       imagePath: 'file:///cache/lead-5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg',
       rawText: 'John Doe\nAcme Corp\nSales Manager'
     });
     expect(alertSpy).not.toHaveBeenCalled();
     expect(warnSpy).toHaveBeenCalledWith(
-      'Active booth lookup failed; routing capture without booth context',
+      'Team directory load failed',
       expect.any(Error)
     );
   });

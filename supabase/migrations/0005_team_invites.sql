@@ -1,6 +1,6 @@
-create table if not exists public.booth_invites (
+create table if not exists public.team_invites (
   id uuid primary key default gen_random_uuid(),
-  booth_id uuid not null references public.booths(id) on delete cascade,
+  team_id uuid not null references public.teams(id) on delete cascade,
   invited_email text not null,
   invited_email_normalized text not null,
   invited_by uuid not null references auth.users(id) on delete cascade,
@@ -8,37 +8,37 @@ create table if not exists public.booth_invites (
   status text not null default 'pending' check (status in ('pending', 'accepted', 'declined')),
   responded_at timestamptz,
   created_at timestamptz not null default now(),
-  constraint booth_invites_email_normalized_check
+  constraint team_invites_email_normalized_check
     check (invited_email_normalized = lower(trim(invited_email)))
 );
 
-create unique index if not exists booth_invites_pending_unique_idx
-  on public.booth_invites(booth_id, invited_email_normalized)
+create unique index if not exists team_invites_pending_unique_idx
+  on public.team_invites(team_id, invited_email_normalized)
   where status = 'pending';
 
-create index if not exists booth_invites_email_status_idx
-  on public.booth_invites(invited_email_normalized, status, created_at);
+create index if not exists team_invites_email_status_idx
+  on public.team_invites(invited_email_normalized, status, created_at);
 
-alter table public.booth_invites enable row level security;
+alter table public.team_invites enable row level security;
 
-drop policy if exists "booth_invites_select_leader_or_invited" on public.booth_invites;
-create policy "booth_invites_select_leader_or_invited"
-on public.booth_invites
+drop policy if exists "team_invites_select_leader_or_invited" on public.team_invites;
+create policy "team_invites_select_leader_or_invited"
+on public.team_invites
 for select
 to authenticated
 using (
   exists (
     select 1
-    from public.booths
-    where booths.id = booth_invites.booth_id
-      and booths.created_by = auth.uid()
+    from public.teams
+    where teams.id = team_invites.team_id
+      and teams.created_by = auth.uid()
   )
-  or lower(coalesce(auth.jwt() ->> 'email', '')) = booth_invites.invited_email_normalized
+  or lower(coalesce(auth.jwt() ->> 'email', '')) = team_invites.invited_email_normalized
 );
 
-drop policy if exists "booth_invites_insert_leader" on public.booth_invites;
-create policy "booth_invites_insert_leader"
-on public.booth_invites
+drop policy if exists "team_invites_insert_leader" on public.team_invites;
+create policy "team_invites_insert_leader"
+on public.team_invites
 for insert
 to authenticated
 with check (
@@ -48,13 +48,13 @@ with check (
   and invited_user_id is null
   and exists (
     select 1
-    from public.booths
-    where booths.id = booth_invites.booth_id
-      and booths.created_by = auth.uid()
+    from public.teams
+    where teams.id = team_invites.team_id
+      and teams.created_by = auth.uid()
   )
 );
 
-create or replace function public.respond_to_booth_invite(invite_id uuid, decision text)
+create or replace function public.respond_to_team_invite(invite_id uuid, decision text)
 returns void
 language plpgsql
 security definer
@@ -63,7 +63,7 @@ as $$
 declare
   current_user_id uuid := auth.uid();
   current_email text := lower(coalesce(auth.jwt() ->> 'email', ''));
-  target_invite public.booth_invites%rowtype;
+  target_invite public.team_invites%rowtype;
 begin
   if current_user_id is null then
     raise exception 'Authenticated user required';
@@ -79,7 +79,7 @@ begin
 
   select *
   into target_invite
-  from public.booth_invites
+  from public.team_invites
   where id = invite_id
   for update;
 
@@ -96,18 +96,18 @@ begin
   end if;
 
   if decision = 'accept' then
-    insert into public.booth_memberships (booth_id, user_id)
-    values (target_invite.booth_id, current_user_id)
-    on conflict (booth_id, user_id) do nothing;
+    insert into public.team_memberships (team_id, user_id)
+    values (target_invite.team_id, current_user_id)
+    on conflict (team_id, user_id) do nothing;
 
-    update public.booth_invites
+    update public.team_invites
     set
       invited_user_id = current_user_id,
       responded_at = now(),
       status = 'accepted'
     where id = target_invite.id;
   else
-    update public.booth_invites
+    update public.team_invites
     set
       invited_user_id = null,
       responded_at = now(),
@@ -117,5 +117,5 @@ begin
 end;
 $$;
 
-revoke all on function public.respond_to_booth_invite(uuid, text) from public;
-grant execute on function public.respond_to_booth_invite(uuid, text) to authenticated;
+revoke all on function public.respond_to_team_invite(uuid, text) from public;
+grant execute on function public.respond_to_team_invite(uuid, text) to authenticated;

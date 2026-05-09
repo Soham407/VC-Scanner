@@ -16,7 +16,7 @@ const requestSchema = z.object({
   rawText: z.string().min(1),
   imagePath: z.string().min(1),
   leadId: z.string().uuid(),
-  boothId: z.string().uuid().nullable().optional(),
+  teamId: z.string().uuid().nullable().optional(),
 });
 
 type ErrorPayload = {
@@ -153,7 +153,7 @@ Deno.serve(async (req) => {
       .insert({
         id: bodyResult.data.leadId,
         user_id: userData.user.id,
-        booth_id: bodyResult.data.boothId ?? null,
+        team_id: bodyResult.data.teamId ?? null,
         ...dbFields,
         image_url: downloadPath,
         raw_ocr_text: bodyResult.data.rawText,

@@ -12,6 +12,7 @@ import { motion } from '../theme/motion';
 import { type OcrStatus, StatusChip } from './StatusChip';
 
 type ScanHeroCardProps = {
+  activeTeamName: string | null;
   failedCount: number;
   inFlightCount: number;
   savedCount: number;
@@ -63,6 +64,7 @@ function MotionButton({
 }
 
 export function ScanHeroCard({
+  activeTeamName,
   failedCount,
   inFlightCount,
   onOpenCamera,
@@ -84,23 +86,26 @@ export function ScanHeroCard({
     >
       <View style={styles.content}>
         <View style={styles.copy}>
-          <StatusChip status={status} />
+          <Text style={[styles.kicker, { color: theme.colors.primary }]} variant="labelSmall">
+            {activeTeamName ? `${activeTeamName} · active Team` : 'No active Team'}
+          </Text>
           <Text style={styles.title} variant="headlineMedium">
-            Capture cards without the clutter
+            Scan card
           </Text>
           <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
-            Keep the card inside the frame, the app will clean the photo, read the text, and queue the save when needed.
+            Capture now. Assign after. Every card is saved into the active Team before Workers see it.
           </Text>
           <View style={styles.actions}>
             <MotionButton icon="camera" mode="contained" onPress={onOpenCamera} testID="dashboard-scan-button">
-              Scan card
+              Confirm Team and capture
             </MotionButton>
             <MotionButton icon="history" mode="outlined" onPress={onOpenHistory} testID="history-button">
-              History
+              Team Inbox
             </MotionButton>
           </View>
         </View>
         <View style={styles.summaryWrap}>
+          <StatusChip status={status} />
           <View style={[styles.summaryPanel, { backgroundColor: theme.colors.surfaceContainerHighest }]}>
             <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelLarge">
               Saved
@@ -152,13 +157,18 @@ const styles = StyleSheet.create({
     gap: 18
   },
   hero: {
-    borderRadius: 28,
+    borderRadius: 8,
     padding: 20
+  },
+  kicker: {
+    fontWeight: '800',
+    letterSpacing: 1.1,
+    textTransform: 'uppercase'
   },
   summaryPanel: {
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 22,
+    borderRadius: 8,
     gap: 4,
     minWidth: 112,
     paddingHorizontal: 16,
@@ -166,7 +176,7 @@ const styles = StyleSheet.create({
   },
   summaryRow: {
     alignItems: 'center',
-    borderRadius: 18,
+    borderRadius: 8,
     gap: 2,
     minWidth: 84,
     paddingHorizontal: 14,

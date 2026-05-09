@@ -15,7 +15,7 @@ type InvokeScanCardParams = {
   rawText: string;
   imagePath: string;
   leadId: string;
-  boothId?: string | null;
+  teamId?: string | null;
 };
 
 export type InvokeScanCardResponse = {
@@ -151,7 +151,7 @@ export async function invokeScanCard(params: InvokeScanCardParams): Promise<Invo
     'scan-card',
     {
       body: {
-        boothId: params.boothId ?? null,
+        teamId: params.teamId ?? null,
         imagePath: params.imagePath,
         leadId: params.leadId,
         rawText: params.rawText

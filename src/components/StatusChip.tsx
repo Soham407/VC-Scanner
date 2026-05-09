@@ -82,8 +82,8 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     flexDirection: 'row',
     gap: 8,
-    minHeight: 32,
-    paddingHorizontal: 12
+    minHeight: 28,
+    paddingHorizontal: 9
   },
   dot: {
     borderRadius: 5,

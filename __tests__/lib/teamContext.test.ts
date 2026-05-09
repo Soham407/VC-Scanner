@@ -1,4 +1,4 @@
-import { getActiveBoothId, setActiveBoothId } from '../../src/lib/boothContext';
+import { getActiveTeamId, setActiveTeamId } from '../../src/lib/teamContext';
 import { supabase } from '../../src/lib/supabase';
 
 jest.mock('../../src/lib/supabase', () => ({
@@ -10,29 +10,29 @@ jest.mock('../../src/lib/supabase', () => ({
   }
 }));
 
-describe('boothContext', () => {
+describe('teamContext', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
-  it('reads active booth id for the authenticated user', async () => {
+  it('reads active team id for the authenticated user', async () => {
     (supabase.auth.getUser as jest.Mock).mockResolvedValue({
       data: { user: { id: 'user-123' } },
       error: null
     });
 
     const maybeSingle = jest.fn().mockResolvedValue({
-      data: { booth_id: 'booth-123' },
+      data: { team_id: 'team-123' },
       error: null
     });
     const eq = jest.fn().mockReturnValue({ maybeSingle });
     const select = jest.fn().mockReturnValue({ eq });
     (supabase.from as jest.Mock).mockReturnValue({ select });
 
-    await expect(getActiveBoothId()).resolves.toBe('booth-123');
+    await expect(getActiveTeamId()).resolves.toBe('team-123');
 
-    expect(supabase.from).toHaveBeenCalledWith('user_booth_contexts');
-    expect(select).toHaveBeenCalledWith('booth_id');
+    expect(supabase.from).toHaveBeenCalledWith('user_team_contexts');
+    expect(select).toHaveBeenCalledWith('team_id');
     expect(eq).toHaveBeenCalledWith('user_id', 'user-123');
   });
 
@@ -42,11 +42,11 @@ describe('boothContext', () => {
       error: null
     });
 
-    await expect(getActiveBoothId()).resolves.toBeNull();
+    await expect(getActiveTeamId()).resolves.toBeNull();
     expect(supabase.from).not.toHaveBeenCalled();
   });
 
-  it('persists active booth id via upsert', async () => {
+  it('persists active team id via upsert', async () => {
     (supabase.auth.getUser as jest.Mock).mockResolvedValue({
       data: { user: { id: 'user-123' } },
       error: null
@@ -55,12 +55,12 @@ describe('boothContext', () => {
     const upsert = jest.fn().mockResolvedValue({ error: null });
     (supabase.from as jest.Mock).mockReturnValue({ upsert });
 
-    await setActiveBoothId('booth-123');
+    await setActiveTeamId('team-123');
 
-    expect(supabase.from).toHaveBeenCalledWith('user_booth_contexts');
+    expect(supabase.from).toHaveBeenCalledWith('user_team_contexts');
     expect(upsert).toHaveBeenCalledWith(
       {
-        booth_id: 'booth-123',
+        team_id: 'team-123',
         user_id: 'user-123'
       },
       {
@@ -69,7 +69,7 @@ describe('boothContext', () => {
     );
   });
 
-  it('clears active booth context when booth id is null', async () => {
+  it('clears active team context when team id is null', async () => {
     (supabase.auth.getUser as jest.Mock).mockResolvedValue({
       data: { user: { id: 'user-123' } },
       error: null
@@ -79,9 +79,9 @@ describe('boothContext', () => {
     const deleteRow = jest.fn().mockReturnValue({ eq });
     (supabase.from as jest.Mock).mockReturnValue({ delete: deleteRow });
 
-    await setActiveBoothId(null);
+    await setActiveTeamId(null);
 
-    expect(supabase.from).toHaveBeenCalledWith('user_booth_contexts');
+    expect(supabase.from).toHaveBeenCalledWith('user_team_contexts');
     expect(deleteRow).toHaveBeenCalledTimes(1);
     expect(eq).toHaveBeenCalledWith('user_id', 'user-123');
   });

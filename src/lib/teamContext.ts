@@ -1,10 +1,10 @@
 import { supabase } from './supabase';
 
-type ActiveBoothContextRow = {
-  booth_id: string;
+type ActiveTeamContextRow = {
+  team_id: string;
 };
 
-export async function getActiveBoothId(): Promise<string | null> {
+export async function getActiveTeamId(): Promise<string | null> {
   const { data: userData, error: userError } = await supabase.auth.getUser();
 
   if (userError || !userData.user) {
@@ -12,8 +12,8 @@ export async function getActiveBoothId(): Promise<string | null> {
   }
 
   const { data, error } = await supabase
-    .from('user_booth_contexts')
-    .select('booth_id')
+    .from('user_team_contexts')
+    .select('team_id')
     .eq('user_id', userData.user.id)
     .maybeSingle();
 
@@ -21,20 +21,20 @@ export async function getActiveBoothId(): Promise<string | null> {
     throw new Error(error.message);
   }
 
-  return (data as ActiveBoothContextRow | null)?.booth_id ?? null;
+  return (data as ActiveTeamContextRow | null)?.team_id ?? null;
 }
 
-export async function setActiveBoothId(boothId: string | null): Promise<void> {
+export async function setActiveTeamId(teamId: string | null): Promise<void> {
   const { data: userData, error: userError } = await supabase.auth.getUser();
 
   if (userError || !userData.user) {
-    throw new Error('Authenticated user required for booth context');
+    throw new Error('Authenticated user required for team context');
   }
 
   const userId = userData.user.id;
 
-  if (boothId === null) {
-    const { error } = await supabase.from('user_booth_contexts').delete().eq('user_id', userId);
+  if (teamId === null) {
+    const { error } = await supabase.from('user_team_contexts').delete().eq('user_id', userId);
     if (error) {
       throw new Error(error.message);
     }
@@ -43,10 +43,10 @@ export async function setActiveBoothId(boothId: string | null): Promise<void> {
   }
 
   const { error } = await supabase
-    .from('user_booth_contexts')
+    .from('user_team_contexts')
     .upsert(
       {
-        booth_id: boothId,
+        team_id: teamId,
         user_id: userId
       },
       {

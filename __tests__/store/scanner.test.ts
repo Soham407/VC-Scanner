@@ -144,7 +144,7 @@ it('retry resets failed item to uploading, clears error, and resets retryCount t
 
     store.getState().enqueue({
       id: 'lead-1',
-      boothId: 'booth-1',
+      teamId: 'team-1',
       imagePath: 'file:///cache/lead-lead-1.jpg',
       rawText: 'John Doe\nAcme Corp'
     });
@@ -153,7 +153,7 @@ it('retry resets failed item to uploading, clears error, and resets retryCount t
 
     expect(uploadCardImage).toHaveBeenCalledWith('file:///cache/lead-lead-1.jpg', 'lead-1');
     expect(invokeScanCard).toHaveBeenCalledWith({
-      boothId: 'booth-1',
+      teamId: 'team-1',
       imagePath: 'card-images/user-1/lead-1.jpg',
       leadId: 'lead-1',
       rawText: 'John Doe\nAcme Corp'
@@ -329,7 +329,7 @@ it('retry resets failed item to uploading, clears error, and resets retryCount t
 
     expect(uploadCardImage).toHaveBeenCalledWith('file:///cache/lead-lead-2.jpg', 'lead-2');
     expect(invokeScanCard).toHaveBeenCalledWith({
-      boothId: null,
+      teamId: null,
       imagePath: 'card-images/user-1/lead-2.jpg',
       leadId: 'lead-2',
       rawText: 'Second'
@@ -378,7 +378,7 @@ it('retry resets failed item to uploading, clears error, and resets retryCount t
 
     expect(uploadCardImage).toHaveBeenCalledWith('file:///cache/lead-lead-2.jpg', 'lead-2');
     expect(invokeScanCard).toHaveBeenCalledWith({
-      boothId: null,
+      teamId: null,
       imagePath: 'card-images/user-1/lead-2.jpg',
       leadId: 'lead-2',
       rawText: 'Second'

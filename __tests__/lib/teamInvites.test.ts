@@ -1,8 +1,8 @@
 import {
-  createBoothInvite,
-  listPendingBoothInvitesForEmail,
-  respondToBoothInvite
-} from '../../src/lib/boothInvites';
+  createTeamInvite,
+  listPendingTeamInvitesForEmail,
+  respondToTeamInvite
+} from '../../src/lib/teamInvites';
 import { supabase } from '../../src/lib/supabase';
 
 jest.mock('../../src/lib/supabase', () => ({
@@ -15,7 +15,7 @@ jest.mock('../../src/lib/supabase', () => ({
   }
 }));
 
-describe('boothInvites', () => {
+describe('teamInvites', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
@@ -28,7 +28,7 @@ describe('boothInvites', () => {
 
     const single = jest.fn().mockResolvedValue({
       data: {
-        booth_id: 'booth-1',
+        team_id: 'team-1',
         created_at: '2026-05-02T11:30:00.000Z',
         id: 'invite-1',
         invited_email: 'worker@example.com',
@@ -41,21 +41,21 @@ describe('boothInvites', () => {
     (supabase.from as jest.Mock).mockReturnValue({ insert });
 
     await expect(
-      createBoothInvite({
-        boothId: 'booth-1',
+      createTeamInvite({
+        teamId: 'team-1',
         invitedEmail: 'Worker@Example.com'
       })
     ).resolves.toEqual({
-      boothId: 'booth-1',
+      teamId: 'team-1',
       createdAt: '2026-05-02T11:30:00.000Z',
       id: 'invite-1',
       invitedEmail: 'worker@example.com',
       status: 'pending'
     });
 
-    expect(supabase.from).toHaveBeenCalledWith('booth_invites');
+    expect(supabase.from).toHaveBeenCalledWith('team_invites');
     expect(insert).toHaveBeenCalledWith({
-      booth_id: 'booth-1',
+      team_id: 'team-1',
       invited_by: 'leader-1',
       invited_email: 'Worker@Example.com',
       invited_email_normalized: 'worker@example.com',
@@ -67,8 +67,8 @@ describe('boothInvites', () => {
     const order = jest.fn().mockResolvedValue({
       data: [
         {
-          booth_id: 'booth-1',
-          booths: { name: 'Main Booth' },
+          team_id: 'team-1',
+          teams: { name: 'Main Team' },
           created_at: '2026-05-02T10:00:00.000Z',
           id: 'invite-1',
           invited_email: 'user@example.com'
@@ -81,17 +81,17 @@ describe('boothInvites', () => {
     const select = jest.fn().mockReturnValue({ eq: eqInvitedEmail });
     (supabase.from as jest.Mock).mockReturnValue({ select });
 
-    await expect(listPendingBoothInvitesForEmail('User@Example.com')).resolves.toEqual([
+    await expect(listPendingTeamInvitesForEmail('User@Example.com')).resolves.toEqual([
       {
-        boothId: 'booth-1',
-        boothName: 'Main Booth',
+        teamId: 'team-1',
+        teamName: 'Main Team',
         createdAt: '2026-05-02T10:00:00.000Z',
         id: 'invite-1',
         invitedEmail: 'user@example.com'
       }
     ]);
 
-    expect(supabase.from).toHaveBeenCalledWith('booth_invites');
+    expect(supabase.from).toHaveBeenCalledWith('team_invites');
     expect(eqInvitedEmail).toHaveBeenCalledWith('invited_email_normalized', 'user@example.com');
     expect(eqStatus).toHaveBeenCalledWith('status', 'pending');
     expect(order).toHaveBeenCalledWith('created_at', { ascending: true });
@@ -100,9 +100,9 @@ describe('boothInvites', () => {
   it('responds to an invite through the secure RPC workflow', async () => {
     (supabase.rpc as jest.Mock).mockResolvedValue({ error: null });
 
-    await expect(respondToBoothInvite('invite-1', 'accept')).resolves.toBeUndefined();
+    await expect(respondToTeamInvite('invite-1', 'accept')).resolves.toBeUndefined();
 
-    expect(supabase.rpc).toHaveBeenCalledWith('respond_to_booth_invite', {
+    expect(supabase.rpc).toHaveBeenCalledWith('respond_to_team_invite', {
       decision: 'accept',
       invite_id: 'invite-1'
     });
