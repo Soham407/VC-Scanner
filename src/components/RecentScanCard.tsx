@@ -6,7 +6,7 @@ import Animated, {
   useSharedValue,
   withSpring
 } from 'react-native-reanimated';
-import { Surface, Text } from 'react-native-paper';
+import { Surface, Text } from '../design/openDesign';
 
 import type { ScannerHistoryItem } from '../../store/scanner';
 import { useAppTheme } from '../theme/materialTheme';
@@ -79,7 +79,9 @@ export function RecentScanCard({
                 </Text>
               </View>
             </View>
-            <StatusChip status={item.parseStatus === 'parsed' ? 'parsed' : 'idle'} />
+            <View style={styles.side}>
+              <StatusChip status={item.parseStatus === 'parsed' ? 'parsed' : 'idle'} />
+            </View>
           </Surface>
         </Pressable>
       </Animated.View>
@@ -90,7 +92,9 @@ export function RecentScanCard({
 const styles = StyleSheet.create({
   card: {
     alignItems: 'center',
+    borderColor: 'rgba(127, 127, 127, 0.22)',
     borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
     gap: 12,
     padding: 12
@@ -103,12 +107,16 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 6
   },
+  side: {
+    alignItems: 'flex-end',
+    justifyContent: 'space-between'
+  },
   wrap: {
     alignSelf: 'stretch'
   },
   thumb: {
     borderRadius: 8,
-    height: 60,
-    width: 60
+    height: 52,
+    width: 52
   }
 });

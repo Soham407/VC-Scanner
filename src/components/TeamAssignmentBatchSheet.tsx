@@ -1,7 +1,7 @@
 import { BottomSheetModal, BottomSheetView } from '@gorhom/bottom-sheet';
 import { forwardRef, useMemo, type ForwardedRef } from 'react';
 import { Image, ScrollView, StyleSheet, View } from 'react-native';
-import { Button, Chip, Surface, Text } from 'react-native-paper';
+import { Button, Chip, Surface, Text } from '../design/openDesign';
 
 import type { TeamInboxItem } from '../lib/teamInbox';
 import { useAppTheme } from '../theme/materialTheme';
@@ -30,10 +30,10 @@ function TeamAssignmentBatchSheetImpl(
   const theme = useAppTheme();
 
   const renderSummaryText = batchItems.length > 0
-    ? `${batchItems.length} scan${batchItems.length === 1 ? '' : 's'} ready to approve`
-    : 'No scans are currently in the batch.';
+    ? `${batchItems.length} card${batchItems.length === 1 ? '' : 's'} ready to assign`
+    : 'No cards are selected yet.';
   const syncSummary = batchScanCount > batchItems.length
-    ? `${batchScanCount - batchItems.length} item${batchScanCount - batchItems.length === 1 ? '' : 's'} still being synced.`
+    ? `${batchScanCount - batchItems.length} card${batchScanCount - batchItems.length === 1 ? '' : 's'} still saving.`
     : '';
 
   return (
@@ -42,15 +42,15 @@ function TeamAssignmentBatchSheetImpl(
         <Surface elevation={0} style={[styles.headerCard, { backgroundColor: theme.colors.surfaceContainerHigh }]}>
           <View style={styles.headerCopy}>
             <Text style={styles.title} variant="titleLarge">
-              Edit batch
+              Choose cards
             </Text>
             <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
-              Remove scans that should wait, or add cards that were missed before approval.
+              Add the cards you want to give to team members now. Leave the rest in the inbox.
             </Text>
           </View>
           <View style={styles.headerMeta}>
             <Chip compact style={styles.summaryChip}>
-              {batchItems.length} queued
+              {batchItems.length} selected
             </Chip>
             <Chip compact mode="outlined" style={styles.summaryChip}>
               {availableItems.length} open
@@ -63,10 +63,10 @@ function TeamAssignmentBatchSheetImpl(
 
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           <View style={styles.section}>
-            <Text variant="titleMedium">In batch</Text>
+            <Text variant="titleMedium">Selected cards</Text>
             {batchItems.length === 0 ? (
               <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 8 }} variant="bodyMedium">
-                Add a scan from the inbox to build the batch.
+                Add a card from the inbox to prepare assignments.
               </Text>
             ) : (
               <View style={styles.list}>
@@ -101,10 +101,10 @@ function TeamAssignmentBatchSheetImpl(
           </View>
 
           <View style={styles.section}>
-            <Text variant="titleMedium">Available scans</Text>
+            <Text variant="titleMedium">Cards in inbox</Text>
             {availableItems.length === 0 ? (
               <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 8 }} variant="bodyMedium">
-                No unassigned scans are waiting right now.
+                No unassigned cards are waiting right now.
               </Text>
             ) : (
               <View style={styles.list}>

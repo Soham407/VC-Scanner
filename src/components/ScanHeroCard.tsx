@@ -1,11 +1,12 @@
 import { JSX } from 'react';
+import { Platform } from 'react-native';
 import { StyleSheet, View } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
   withSpring,
 } from 'react-native-reanimated';
-import { Button, Surface, Text } from 'react-native-paper';
+import { Button, Surface, Text } from '../design/openDesign';
 
 import { useAppTheme } from '../theme/materialTheme';
 import { motion } from '../theme/motion';
@@ -86,54 +87,53 @@ export function ScanHeroCard({
     >
       <View style={styles.content}>
         <View style={styles.copy}>
-          <Text style={[styles.kicker, { color: theme.colors.primary }]} variant="labelSmall">
-            {activeTeamName ? `${activeTeamName} · active Team` : 'No active Team'}
-          </Text>
+          <View style={styles.kickerRow}>
+            <Text style={[styles.kicker, { color: theme.colors.primary }]} variant="labelSmall">
+              {activeTeamName ? `${activeTeamName} · active team` : 'Choose a team'}
+            </Text>
+            <View style={styles.badgeRow}>
+              <View style={[styles.badge, { backgroundColor: theme.colors.surfaceContainerHighest }]}>
+                <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelSmall">
+                  Capture
+                </Text>
+              </View>
+              <StatusChip status={status} />
+            </View>
+          </View>
           <Text style={styles.title} variant="headlineMedium">
-            Scan card
+            Scan a business card
           </Text>
           <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
-            Capture now. Assign after. Every card is saved into the active Team before Workers see it.
+            Take a photo, check the details, and send the card to the right team member.
           </Text>
+          <View style={[styles.alert, { backgroundColor: theme.colors.surfaceContainer }]}>
+            <Text style={{ color: theme.colors.onSurface }} variant="labelLarge">
+              New cards stay in the team inbox first.
+            </Text>
+            <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }} variant="bodySmall">
+              Team leads can review and assign them when ready.
+            </Text>
+          </View>
+          <View style={styles.pipelineRow}>
+            <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelMedium">
+              {savedCount} saved
+            </Text>
+            <View style={[styles.pipelineDot, { backgroundColor: theme.colors.outlineVariant }]} />
+            <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelMedium">
+              {inFlightCount} saving
+            </Text>
+            <View style={[styles.pipelineDot, { backgroundColor: theme.colors.outlineVariant }]} />
+            <Text style={{ color: failedCount > 0 ? theme.colors.error : theme.colors.onSurfaceVariant }} variant="labelMedium">
+              {failedCount} needs retry
+            </Text>
+          </View>
           <View style={styles.actions}>
             <MotionButton icon="camera" mode="contained" onPress={onOpenCamera} testID="dashboard-scan-button">
-              Confirm Team and capture
+              {activeTeamName ? 'Scan now' : 'Choose team'}
             </MotionButton>
             <MotionButton icon="history" mode="outlined" onPress={onOpenHistory} testID="history-button">
-              Team Inbox
+              View inbox
             </MotionButton>
-          </View>
-        </View>
-        <View style={styles.summaryWrap}>
-          <StatusChip status={status} />
-          <View style={[styles.summaryPanel, { backgroundColor: theme.colors.surfaceContainerHighest }]}>
-            <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelLarge">
-              Saved
-            </Text>
-            <Text style={{ color: theme.colors.primary }} variant="displaySmall">
-              {savedCount}
-            </Text>
-            <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
-              cards stored
-            </Text>
-          </View>
-          <View style={styles.summaryStack}>
-            <View style={[styles.summaryRow, { backgroundColor: theme.colors.surfaceContainer }]}>
-              <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelMedium">
-                Saving
-              </Text>
-              <Text style={{ color: theme.colors.secondary }} variant="titleMedium">
-                {inFlightCount}
-              </Text>
-            </View>
-            <View style={[styles.summaryRow, { backgroundColor: theme.colors.surfaceContainer }]}>
-              <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelMedium">
-                Retry
-              </Text>
-              <Text style={{ color: theme.colors.error }} variant="titleMedium">
-                {failedCount}
-              </Text>
-            </View>
           </View>
         </View>
       </View>
@@ -146,49 +146,70 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 12,
-    marginTop: 20
+    marginTop: 18
+  },
+  alert: {
+    borderRadius: 8,
+    gap: 2,
+    marginTop: 16,
+    padding: 14
   },
   copy: {
     flex: 1
   },
   content: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 18
+    alignItems: 'flex-start',
+    flexDirection: 'row'
   },
   hero: {
+    borderColor: 'rgba(127, 127, 127, 0.22)',
     borderRadius: 8,
-    padding: 20
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: 18
+  },
+  kickerRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+    justifyContent: 'space-between'
   },
   kicker: {
     fontWeight: '800',
     letterSpacing: 1.1,
     textTransform: 'uppercase'
   },
-  summaryPanel: {
+  badge: {
     alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 8,
-    gap: 4,
-    minWidth: 112,
-    paddingHorizontal: 16,
-    paddingVertical: 18
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6
   },
-  summaryRow: {
+  badgeRow: {
     alignItems: 'center',
-    borderRadius: 8,
-    gap: 2,
-    minWidth: 84,
-    paddingHorizontal: 14,
-    paddingVertical: 12
-  },
-  summaryStack: {
-    gap: 10
-  },
-  summaryWrap: {
-    gap: 10
+    flexDirection: 'row',
+    flexShrink: 0,
+    gap: 8
   },
   title: {
+    fontFamily: Platform.select({
+      android: 'serif',
+      default: 'serif',
+      ios: 'Iowan Old Style'
+    }),
+    fontSize: 30,
+    lineHeight: 32,
+    marginTop: 14
+  },
+  pipelineDot: {
+    borderRadius: 2,
+    height: 4,
+    width: 4
+  },
+  pipelineRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
     marginTop: 14
   }
 });

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Alert, KeyboardAvoidingView, Linking, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { Button, HelperText, Surface, Text, TextInput } from 'react-native-paper';
+import { Button, HelperText, Surface, Text, TextInput } from '../design/openDesign';
 import Animated, {
   FadeInDown,
   useAnimatedStyle,
@@ -174,11 +174,6 @@ export function AuthScreen() {
         contentContainerStyle={[styles.container, { backgroundColor: theme.colors.background }]}
         keyboardShouldPersistTaps="handled"
       >
-        <View pointerEvents="none" style={styles.ambientLayer}>
-          <View style={[styles.ambientOrb, styles.ambientOrbTop, { backgroundColor: theme.colors.primaryContainer }]} />
-          <View style={[styles.ambientOrb, styles.ambientOrbBottom, { backgroundColor: theme.colors.tertiaryContainer }]} />
-        </View>
-
         <Animated.View entering={FadeInDown.duration(motion.duration.medium2).easing(motion.easing.emphasized)} style={styles.frame}>
           <Surface elevation={2} style={[styles.panel, { backgroundColor: theme.colors.surfaceContainerHigh }]}>
             <View style={styles.hero}>
@@ -195,22 +190,22 @@ export function AuthScreen() {
                     VC Scanner
                   </Text>
                   <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
-                    One place for capture, review, and save.
+                    Capture, check, and save business cards.
                   </Text>
                 </View>
               </View>
 
               <View style={styles.heroCopy}>
-                <Text variant="headlineLarge">Capture cards, not clerical work.</Text>
+                <Text variant="headlineLarge">Turn cards into contacts.</Text>
                 <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
-                  Sign in once, then keep every scan, review, and contact synced in a clean pipeline built for speed.
+                  Sign in once, scan a card, check the details, and keep the contact ready for your team.
                 </Text>
               </View>
 
               <View style={styles.proofRow}>
-                <AuthProofItem icon="auto-fix" label="OCR ready" />
-                <AuthProofItem icon="cloud-sync" label="Cloud sync" />
-                <AuthProofItem icon="shield-check" label="Private saves" />
+                <AuthProofItem icon="auto-fix" label="Reads cards" />
+                <AuthProofItem icon="cloud-check" label="Saves safely" />
+                <AuthProofItem icon="account-group" label="Team ready" />
               </View>
             </View>
 
@@ -297,7 +292,7 @@ export function AuthScreen() {
                 </View>
               ) : (
                 <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
-                  Use the account you created moments ago, then scan your first card to see the flow end to end.
+                  Use your demo account, then scan your first card to see the full flow.
                 </Text>
               )}
 
@@ -400,27 +395,6 @@ function AuthModeButton({
 const styles = StyleSheet.create({
   actions: {
     gap: 12
-  },
-  ambientLayer: {
-    ...StyleSheet.absoluteFillObject,
-    overflow: 'hidden'
-  },
-  ambientOrb: {
-    borderRadius: 999,
-    opacity: 0.28,
-    position: 'absolute'
-  },
-  ambientOrbBottom: {
-    height: 200,
-    right: -70,
-    top: 520,
-    width: 200
-  },
-  ambientOrbTop: {
-    height: 240,
-    left: -80,
-    top: -30,
-    width: 240
   },
   buttonContent: {
     paddingVertical: 6

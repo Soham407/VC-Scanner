@@ -1,7 +1,7 @@
 import { JSX } from 'react';
 import { StyleSheet } from 'react-native';
 import Animated, { FadeInDown, FadeOutUp, LinearTransition } from 'react-native-reanimated';
-import { Chip } from 'react-native-paper';
+import { Chip } from '../design/openDesign';
 
 import { motion } from '../theme/motion';
 
@@ -23,7 +23,7 @@ export function CornerPill({ count, onPress }: CornerPillProps): JSX.Element | n
       style={styles.pill}
     >
       <Chip
-        accessibilityLabel={`${count} background save${count === 1 ? '' : 's'} in progress`}
+        accessibilityLabel={`${count} card${count === 1 ? '' : 's'} saving`}
         compact
         icon="cloud-sync"
         mode="flat"

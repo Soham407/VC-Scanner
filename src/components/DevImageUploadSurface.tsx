@@ -1,7 +1,7 @@
 import * as ImagePicker from 'expo-image-picker';
 import { JSX, useState } from 'react';
 import { Image, StyleSheet, View } from 'react-native';
-import { Button, Text } from 'react-native-paper';
+import { Button, Text } from '../design/openDesign';
 
 import { prepareImage } from '../lib/imagePrep';
 import { uploadCardImage } from '../lib/upload';

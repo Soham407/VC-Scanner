@@ -30,6 +30,9 @@
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO"
       ],
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO"
+      ],
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "package": "com.anonymous.vcscanner"
@@ -47,6 +50,11 @@
     ],
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "bff2f5c9-73e7-4102-8329-d67a2c514c7d"
+      }
     }
   }
 }

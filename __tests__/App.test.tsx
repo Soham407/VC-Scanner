@@ -590,7 +590,7 @@ describe('App permissions flow', () => {
       await Promise.resolve();
     });
 
-    expect(screen.getByText('Create 1 Assignments?')).toBeTruthy();
+    expect(screen.getByText('Assign 1 card?')).toBeTruthy();
     fireEvent.press(screen.getByTestId('confirm-approve-assignment-batch-button'));
 
     await act(async () => {
@@ -850,8 +850,8 @@ describe('App permissions flow', () => {
       await Promise.resolve();
     });
 
-    expect(screen.queryByText('Active Team')).toBeNull();
-    expect(screen.queryByText('Pending Invite')).toBeNull();
+    expect(screen.queryByText('Active team')).toBeNull();
+    expect(screen.queryByText('Pending invite')).toBeNull();
 
     fireEvent.changeText(screen.getByTestId('team-name-input'), 'North Hall');
     fireEvent.press(screen.getByTestId('create-team-button'));
@@ -864,10 +864,10 @@ describe('App permissions flow', () => {
     expect(mockCreateTeam).toHaveBeenCalledWith('North Hall');
     expect(mockSetActiveTeamId).toHaveBeenCalledWith('team-9');
     await waitFor(() => {
-      expect(screen.getByText('Active Team')).toBeTruthy();
+      expect(screen.getByText('Active team')).toBeTruthy();
     });
     await waitFor(() => {
-      expect(screen.getByText('Pending Invite')).toBeTruthy();
+      expect(screen.getByText('Pending invite')).toBeTruthy();
     });
     expect(screen.queryByText('Switch Team')).toBeNull();
   });
@@ -899,7 +899,7 @@ describe('App permissions flow', () => {
       await Promise.resolve();
     });
 
-    expect(screen.getByText('Pending Invite')).toBeTruthy();
+    expect(screen.getByText('Pending invite')).toBeTruthy();
     fireEvent.changeText(screen.getByTestId('invite-email-input'), 'worker@example.com');
     fireEvent.press(screen.getByTestId('create-invite-button'));
 

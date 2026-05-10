@@ -1,7 +1,7 @@
 import { BottomSheetModal, BottomSheetView } from '@gorhom/bottom-sheet';
 import { forwardRef, useMemo, type ForwardedRef } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
-import { Button, Chip, Surface, Text } from 'react-native-paper';
+import { Button, Chip, Surface, Text } from '../design/openDesign';
 
 import type { TeamInboxItem } from '../lib/teamInbox';
 import type { TeamMember } from '../lib/teamMembers';
@@ -33,10 +33,10 @@ function TeamReassignSheetImpl(
         <Surface elevation={0} style={[styles.headerCard, { backgroundColor: theme.colors.surfaceContainerHigh }]}>
           <View style={styles.headerCopy}>
             <Text style={styles.title} variant="titleLarge">
-              Reassign work
+              Reassign card
             </Text>
             <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
-              Move this assignment to another team member.
+              Move this card to another team member.
             </Text>
           </View>
           {assignmentItem ? (
@@ -58,7 +58,7 @@ function TeamReassignSheetImpl(
               <Text variant="titleMedium">Choose a member</Text>
               {workers.length === 0 ? (
                 <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 8 }} variant="bodyMedium">
-                  No Workers are available for reassignment.
+                  No team members are available for reassignment.
                 </Text>
               ) : (
                 <View style={styles.list}>
@@ -73,8 +73,8 @@ function TeamReassignSheetImpl(
                         <View style={styles.rowCopy}>
                           <Text variant="titleSmall">{member.email}</Text>
                           <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
-                            {member.isLeader ? 'Team leader' : 'Worker'}
-                            {isCurrentAssignee ? ' · Current assignee' : ''}
+                            {member.isLeader ? 'Team lead' : 'Team member'}
+                            {isCurrentAssignee ? ' · Current owner' : ''}
                           </Text>
                         </View>
                         <Button
@@ -94,7 +94,7 @@ function TeamReassignSheetImpl(
             </View>
           ) : (
             <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
-              Select an assignment to reassign it.
+              Select a card to reassign it.
             </Text>
           )}
         </ScrollView>

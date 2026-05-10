@@ -7,7 +7,7 @@ import Animated, {
   useSharedValue,
   withSpring
 } from 'react-native-reanimated';
-import { Surface, Text } from 'react-native-paper';
+import { Surface, Text } from '../design/openDesign';
 
 import { useAppTheme } from '../theme/materialTheme';
 import { motion } from '../theme/motion';
@@ -128,17 +128,17 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     bottom: 0,
     flexDirection: 'row',
-    gap: 4,
+    gap: 6,
     left: 0,
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     paddingTop: 8,
     position: 'absolute',
     right: 0
   },
   iconPill: {
     alignItems: 'center',
-    borderRadius: 999,
-    height: 30,
+    borderRadius: 8,
+    height: 32,
     justifyContent: 'center',
     minWidth: 52
   },

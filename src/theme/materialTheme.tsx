@@ -1,98 +1,118 @@
-import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { useMaterial3Theme, type Material3Scheme, type Material3Theme } from '@pchmn/expo-material3-theme';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { createContext, type ReactNode, useEffect, useMemo, useRef, useState, useContext } from 'react';
+import { createContext, type ReactNode, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useColorScheme } from 'react-native';
-import {
-  MD3DarkTheme,
-  MD3LightTheme,
-  type MD3Theme,
-  PaperProvider,
-  useTheme
-} from 'react-native-paper';
 
-const BRAND_SOURCE_COLOR = '#9A4B36';
 const COLOR_MODE_STORAGE_KEY = 'vs-scanner:color-mode';
 
 export type ColorMode = 'dark' | 'light';
 
-type MaterialThemeContextValue = {
+type OpenDesignColors = {
+  background: string;
+  error: string;
+  errorContainer: string;
+  onErrorContainer: string;
+  onPrimaryContainer: string;
+  onSecondaryContainer: string;
+  onSurface: string;
+  onSurfaceVariant: string;
+  onTertiaryContainer: string;
+  outlineVariant: string;
+  primary: string;
+  primaryContainer: string;
+  scrim: string;
+  secondary: string;
+  secondaryContainer: string;
+  surface: string;
+  surfaceContainer: string;
+  surfaceContainerHigh: string;
+  surfaceContainerHighest: string;
+  tertiary: string;
+  tertiaryContainer: string;
+};
+
+type OpenDesignTheme = {
+  colors: OpenDesignColors;
+  dark: boolean;
+  roundness: number;
+};
+
+type ThemeControlsContextValue = {
   colorMode: ColorMode;
-  materialTheme: Material3Theme;
+  materialTheme: {
+    dark: OpenDesignTheme;
+    light: OpenDesignTheme;
+  };
   resetTheme: () => void;
   setColorMode: (mode: ColorMode) => void;
   toggleColorMode: () => void;
-  updateTheme: (sourceColor: string) => void;
+  updateTheme: (_sourceColor: string) => void;
 };
 
-const MaterialThemeContext = createContext<MaterialThemeContextValue | null>(null);
-
-type AppPaperTheme = MD3Theme & {
-  colors: Material3Scheme;
+const lightColors: OpenDesignColors = {
+  background: '#F6F8F7',
+  error: '#BA1A1A',
+  errorContainer: '#FFDAD6',
+  onErrorContainer: '#410002',
+  onPrimaryContainer: '#00201D',
+  onSecondaryContainer: '#0F1B2A',
+  onSurface: '#1F2528',
+  onSurfaceVariant: '#5E6A6E',
+  onTertiaryContainer: '#2A1D00',
+  outlineVariant: '#D7E0E2',
+  primary: '#00796B',
+  primaryContainer: '#B8ECE4',
+  scrim: 'rgba(0, 0, 0, 0.45)',
+  secondary: '#315D86',
+  secondaryContainer: '#D8E9FA',
+  surface: '#FFFFFF',
+  surfaceContainer: '#FFFFFF',
+  surfaceContainerHigh: '#EEF5F4',
+  surfaceContainerHighest: '#E2ECEB',
+  tertiary: '#8A6400',
+  tertiaryContainer: '#FFE3A3'
 };
 
-function buildPaperTheme(colorMode: ColorMode, colors: Material3Scheme): AppPaperTheme {
-  const baseTheme = colorMode === 'dark' ? MD3DarkTheme : MD3LightTheme;
-  const prototypeColors = colorMode === 'dark'
-    ? {
-        background: '#191512',
-        error: '#FFB4AB',
-        errorContainer: '#93000A',
-        onErrorContainer: '#FFDAD6',
-        onPrimary: '#FFFFFF',
-        onPrimaryContainer: '#FFEDE7',
-        onSecondaryContainer: '#F6E7E0',
-        onSurface: '#F4EEE9',
-        onSurfaceVariant: '#CDBEB7',
-        primary: '#D88B72',
-        primaryContainer: '#733522',
-        secondary: '#CFA092',
-        secondaryContainer: '#4A2B23',
-        surface: '#1F1A17',
-        surfaceContainer: '#27211D',
-        surfaceContainerHigh: '#2E2722',
-        surfaceContainerHighest: '#38302A',
-        tertiary: '#D9B76E',
-        tertiaryContainer: '#4F3E13'
-      }
-    : {
-        background: '#F8F3EA',
-        error: '#BA1A1A',
-        errorContainer: '#FFDAD6',
-        onErrorContainer: '#410002',
-        onPrimary: '#FFFFFF',
-        onPrimaryContainer: '#3B1106',
-        onSecondaryContainer: '#2E150F',
-        onSurface: '#30251F',
-        onSurfaceVariant: '#75645C',
-        primary: '#9A4B36',
-        primaryContainer: '#FFE0D4',
-        secondary: '#76574D',
-        secondaryContainer: '#F6DED6',
-        surface: '#FFF9F3',
-        surfaceContainer: '#FFF9F3',
-        surfaceContainerHigh: '#FBF2EA',
-        surfaceContainerHighest: '#F0E6DD',
-        tertiary: '#77601E',
-        tertiaryContainer: '#F9E49A'
-      };
+const darkColors: OpenDesignColors = {
+  background: '#111719',
+  error: '#FFB4AB',
+  errorContainer: '#93000A',
+  onErrorContainer: '#FFDAD6',
+  onPrimaryContainer: '#D6FFF8',
+  onSecondaryContainer: '#EAF4FF',
+  onSurface: '#EEF3F4',
+  onSurfaceVariant: '#B8C7CB',
+  onTertiaryContainer: '#FFE9B2',
+  outlineVariant: '#3D4A4E',
+  primary: '#7AD8CA',
+  primaryContainer: '#005047',
+  scrim: 'rgba(0, 0, 0, 0.55)',
+  secondary: '#A8CBEF',
+  secondaryContainer: '#193B59',
+  surface: '#171D20',
+  surfaceContainer: '#1E2629',
+  surfaceContainerHigh: '#263033',
+  surfaceContainerHighest: '#303B3F',
+  tertiary: '#E8C36A',
+  tertiaryContainer: '#5D4300'
+};
 
-  return {
-    ...baseTheme,
-    colors: {
-      ...baseTheme.colors,
-      ...colors,
-      ...prototypeColors
-    },
-    roundness: 3
-  } as AppPaperTheme;
-}
+const lightTheme: OpenDesignTheme = {
+  colors: lightColors,
+  dark: false,
+  roundness: 8
+};
+
+const darkTheme: OpenDesignTheme = {
+  colors: darkColors,
+  dark: true,
+  roundness: 8
+};
+
+const ThemeContext = createContext<OpenDesignTheme | null>(null);
+const ThemeControlsContext = createContext<ThemeControlsContextValue | null>(null);
 
 export function MaterialThemeProvider({ children }: { children: ReactNode }) {
   const systemColorMode: ColorMode = useColorScheme() === 'dark' ? 'dark' : 'light';
-  const { theme, resetTheme, updateTheme } = useMaterial3Theme({
-    fallbackSourceColor: BRAND_SOURCE_COLOR
-  });
   const [colorMode, setColorMode] = useState<ColorMode>(systemColorMode);
   const hasHydratedRef = useRef(false);
 
@@ -106,17 +126,11 @@ export function MaterialThemeProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        if (storedColorMode === 'dark' || storedColorMode === 'light') {
-          setColorMode(storedColorMode);
-        } else {
+        setColorMode(storedColorMode === 'dark' || storedColorMode === 'light' ? storedColorMode : systemColorMode);
+      } catch {
+        if (mounted) {
           setColorMode(systemColorMode);
         }
-      } catch {
-        if (!mounted) {
-          return;
-        }
-
-        setColorMode(systemColorMode);
       } finally {
         if (mounted) {
           hasHydratedRef.current = true;
@@ -137,40 +151,31 @@ export function MaterialThemeProvider({ children }: { children: ReactNode }) {
     void AsyncStorage.setItem(COLOR_MODE_STORAGE_KEY, colorMode);
   }, [colorMode]);
 
-  const paperTheme = useMemo(
-    () => buildPaperTheme(colorMode, colorMode === 'dark' ? theme.dark : theme.light),
-    [colorMode, theme]
+  const theme = colorMode === 'dark' ? darkTheme : lightTheme;
+  const controls = useMemo<ThemeControlsContextValue>(
+    () => ({
+      colorMode,
+      materialTheme: {
+        dark: darkTheme,
+        light: lightTheme
+      },
+      resetTheme: () => undefined,
+      setColorMode,
+      toggleColorMode: () => setColorMode((current) => (current === 'dark' ? 'light' : 'dark')),
+      updateTheme: () => undefined
+    }),
+    [colorMode]
   );
 
-  const toggleColorMode = () => {
-    setColorMode((current) => (current === 'dark' ? 'light' : 'dark'));
-  };
-
   return (
-    <MaterialThemeContext.Provider
-      value={{
-        colorMode,
-        materialTheme: theme,
-        resetTheme,
-        setColorMode,
-        toggleColorMode,
-        updateTheme
-      }}
-    >
-      <PaperProvider
-        settings={{
-          icon: (props) => <MaterialCommunityIcons {...props} />
-        }}
-        theme={paperTheme}
-      >
-        {children}
-      </PaperProvider>
-    </MaterialThemeContext.Provider>
+    <ThemeControlsContext.Provider value={controls}>
+      <ThemeContext.Provider value={theme}>{children}</ThemeContext.Provider>
+    </ThemeControlsContext.Provider>
   );
 }
 
-export function useMaterialThemeControls(): MaterialThemeContextValue {
-  const value = useContext(MaterialThemeContext);
+export function useMaterialThemeControls(): ThemeControlsContextValue {
+  const value = useContext(ThemeControlsContext);
   if (!value) {
     throw new Error('useMaterialThemeControls must be used inside MaterialThemeProvider');
   }
@@ -178,4 +183,11 @@ export function useMaterialThemeControls(): MaterialThemeContextValue {
   return value;
 }
 
-export const useAppTheme = useTheme<AppPaperTheme>;
+export function useAppTheme(): OpenDesignTheme {
+  const value = useContext(ThemeContext);
+  if (!value) {
+    throw new Error('useAppTheme must be used inside MaterialThemeProvider');
+  }
+
+  return value;
+}

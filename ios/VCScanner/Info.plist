@@ -27,6 +27,7 @@
       <dict>
         <key>CFBundleURLSchemes</key>
         <array>
+          <string>vcscanner</string>
           <string>com.anonymous.vcscanner</string>
         </array>
       </dict>
@@ -46,8 +47,6 @@
     </dict>
     <key>NSCameraUsageDescription</key>
     <string>VC Scanner needs camera access to scan business cards.</string>
-    <key>NSMicrophoneUsageDescription</key>
-    <string>Allow $(PRODUCT_NAME) to access your microphone</string>
     <key>RCTNewArchEnabled</key>
     <true/>
     <key>UILaunchStoryboardName</key>

@@ -28,7 +28,7 @@ import {
   Surface,
   TextInput,
   Text
-} from 'react-native-paper';
+} from './src/design/openDesign';
 import type { Session } from '@supabase/supabase-js';
 
 import { AuthScreen } from './src/components/AuthScreen';
@@ -78,6 +78,26 @@ function getTeamInboxItemTitle(item: TeamInboxItem): string {
 
 function getTeamInboxItemSubtitle(item: TeamInboxItem): string {
   return item.companyName ?? item.jobTitle ?? item.email ?? item.id;
+}
+
+function getAssignmentLabel(item: TeamInboxItem): string {
+  if (!item.assignmentState) {
+    return 'In team inbox';
+  }
+
+  if (item.assignmentState === 'done') {
+    return 'Completed';
+  }
+
+  if (item.assignmentState === 'needs_review') {
+    return 'Needs review';
+  }
+
+  return 'Assigned';
+}
+
+function getMemberLabel(memberLabel: string | undefined | null): string {
+  return memberLabel ?? 'Team member';
 }
 
 const routes: Array<{
@@ -140,8 +160,6 @@ function DashboardScreen({
   onOpenHistory: () => void;
   status: OcrStatus;
 }) {
-  const theme = useAppTheme();
-  const parsedCount = history.filter((item) => item.parseStatus === 'parsed').length;
   const recent = history.slice(0, 3);
 
   return (
@@ -158,31 +176,9 @@ function DashboardScreen({
         />
       </Animated.View>
 
-      <Animated.View entering={FadeInDown.delay(110).duration(motion.duration.medium1).easing(motion.easing.emphasized)}>
-        <MetricRail
-          items={[
-            { label: 'Saved', tone: 'default', value: history.length },
-            { label: 'Ready', tone: 'tertiary', value: parsedCount },
-            { label: 'Saving', tone: 'secondary', value: inFlightCount }
-          ]}
-        />
-        {failedCount > 0 ? (
-          <Text
-            style={{ color: theme.colors.error, marginTop: 8 }}
-            variant="labelLarge"
-          >
-            {failedCount} scan{failedCount === 1 ? '' : 's'} need a retry.
-          </Text>
-        ) : (
-          <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 8 }} variant="labelLarge">
-            New captures stay in the Team Inbox until a Team Leader assigns them.
-          </Text>
-        )}
-      </Animated.View>
-
-      <Animated.View entering={FadeInDown.delay(180).duration(motion.duration.medium2).easing(motion.easing.emphasized)}>
+      <Animated.View entering={FadeInDown.delay(120).duration(motion.duration.medium2).easing(motion.easing.emphasized)}>
         <Card mode="outlined" style={styles.sectionCard}>
-          <Card.Title subtitle="Unassigned scans are ready for review." title="Latest saves" />
+          <Card.Title subtitle="Recently saved cards from this device." title="Recent cards" />
           <Card.Content>
             {recent.length === 0 ? (
               <Text variant="bodyMedium">
@@ -278,8 +274,8 @@ function HistoryScreen({
   });
   const title = mode === 'leader-inbox' ? 'Team Inbox' : 'Assignments';
   const subtitle = mode === 'leader-inbox'
-    ? 'Review unassigned scans, edit the pending Batch Assignment, or reassign work.'
-    : 'Only scans assigned to your account appear here.';
+    ? 'Review new cards, choose who should handle them, and keep the team moving.'
+    : 'Cards assigned to you appear here.';
   const availableFilters = mode === 'leader-inbox'
     ? [
         { count: items.length, label: 'All', value: 'all' as const },
@@ -303,7 +299,7 @@ function HistoryScreen({
         >
           <View style={styles.historyHeroCopy}>
             <Text style={styles.screenKicker} variant="labelSmall">
-              {mode === 'leader-inbox' ? 'Team Leader' : 'Worker'}
+              {mode === 'leader-inbox' ? 'Team lead' : 'My work'}
             </Text>
             <Text variant="headlineMedium">{title}</Text>
             <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }} variant="bodyMedium">
@@ -315,9 +311,16 @@ function HistoryScreen({
               </Text>
             ) : null}
           </View>
-          <Button icon="camera" mode="contained" onPress={onOpenCamera} testID="history-empty-scan-button">
-            Scan card
-          </Button>
+          <View style={styles.historyHeroActions}>
+            <View style={[styles.historyHeroBadge, { backgroundColor: theme.colors.surfaceContainerHighest }]}>
+              <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelSmall">
+                {mode === 'leader-inbox' ? 'Lead view' : 'My view'}
+              </Text>
+            </View>
+            <Button icon="camera" mode="contained" onPress={onOpenCamera} testID="history-empty-scan-button">
+              Scan card
+            </Button>
+          </View>
         </Surface>
       </Animated.View>
 
@@ -351,7 +354,7 @@ function HistoryScreen({
                 onPress={onCreateBatch}
                 testID="create-assignment-batch-button"
               >
-                Create batch
+                Select cards
               </Button>
               <Button
                 disabled={!canEditBatch || isBatchActionLoading}
@@ -359,7 +362,7 @@ function HistoryScreen({
                 onPress={onEditBatch}
                 testID="edit-assignment-batch-button"
               >
-                Edit batch
+                Edit selection
               </Button>
               <Button
                 disabled={!canApproveBatch || isBatchActionLoading}
@@ -367,7 +370,7 @@ function HistoryScreen({
                 onPress={onApproveBatch}
                 testID="approve-assignment-batch-button"
               >
-                Approve batch
+                Assign cards
               </Button>
             </View>
           </Surface>
@@ -398,7 +401,7 @@ function HistoryScreen({
           <Card.Content style={styles.emptyContent}>
             <ActivityIndicator />
             <Text style={{ marginTop: 12 }} variant="bodyMedium">
-              Loading {mode === 'leader-inbox' ? 'team inbox' : 'history'}...
+              Loading {mode === 'leader-inbox' ? 'team inbox' : 'your cards'}...
             </Text>
           </Card.Content>
         </Card>
@@ -413,7 +416,7 @@ function HistoryScreen({
                 {items.length === 0
                   ? mode === 'leader-inbox'
                     ? 'Team scans will appear here as your team captures cards.'
-                    : 'Assigned scans will appear here after your team leader approves a batch.'
+                    : 'Cards will appear here after your team lead assigns them.'
                   : 'Try another filter to see more cards.'}
               </Text>
               <Button icon="camera" mode="contained" onPress={onOpenCamera}>
@@ -430,72 +433,67 @@ function HistoryScreen({
               layout={LinearTransition.springify().damping(24).stiffness(300)}
             >
               <Pressable accessibilityRole="button" onPress={() => onOpenItem(item)} testID={`open-history-item-${item.id}`}>
-              <Surface elevation={1} style={[styles.historyRow, { backgroundColor: theme.colors.surfaceContainer }]}>
-                <View style={styles.historyRowCopy}>
-                  <Text numberOfLines={1} variant="titleMedium">
-                    {getTeamInboxItemTitle(item)}
-                  </Text>
-                  <Text numberOfLines={1} style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
-                    {getTeamInboxItemSubtitle(item)}
-                  </Text>
-                  {mode === 'leader-inbox' ? (
-                    <>
-                      <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }} variant="labelSmall">
-                        {item.assignmentState
-                          ? `Assignment: ${item.assignmentState === 'done' ? 'Done' : item.assignmentState === 'needs_review' ? 'Needs review' : 'Assigned'}`
-                          : 'Unassigned · Team Inbox'}
-                      </Text>
-                      <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }} variant="labelSmall">
-                        {item.assignmentState && item.assignedToUserId
-                          ? `Assigned to ${memberLabelById.get(item.assignedToUserId) ?? item.assignedToUserId}`
-                          : `Captured by ${item.capturedByUserId}`}
-                      </Text>
-                    </>
-                  ) : item.assignmentState ? (
-                    <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }} variant="labelSmall">
-                      Assignment: {item.assignmentState === 'done' ? 'Done' : item.assignmentState === 'needs_review' ? 'Needs review' : 'Assigned'}
+                <Surface elevation={1} style={[styles.historyRow, { backgroundColor: theme.colors.surfaceContainer }]}>
+                  <View style={[styles.historyAvatar, { backgroundColor: theme.colors.surfaceContainerHighest }]}>
+                    <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelLarge">
+                      {getTeamInboxItemTitle(item).slice(0, 2).toUpperCase()}
                     </Text>
-                  ) : null}
-                  {mode === 'leader-inbox' && item.assignmentState ? (
-                    <View style={styles.assignmentActions}>
-                      <Button
-                        compact
-                        mode="outlined"
-                        onPress={() => onOpenReassignAssignment(item)}
-                      >
-                        Reassign
-                      </Button>
+                  </View>
+                  <View style={styles.historyRowCopy}>
+                    <Text numberOfLines={1} variant="titleMedium">
+                      {getTeamInboxItemTitle(item)}
+                    </Text>
+                    <Text numberOfLines={1} style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
+                      {getTeamInboxItemSubtitle(item)}
+                    </Text>
+                    <View style={styles.historyMetaRow}>
+                      <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelSmall">
+                        {getAssignmentLabel(item)}
+                      </Text>
+                      <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelSmall">
+                        {mode === 'worker-history'
+                          ? 'Assigned to you'
+                          : item.assignmentState && item.assignedToUserId
+                          ? `Assigned to ${getMemberLabel(memberLabelById.get(item.assignedToUserId))}`
+                          : 'Waiting for assignment'}
+                      </Text>
                     </View>
-                  ) : null}
-                  {mode === 'worker-history' && item.assignmentState ? (
-                    <View style={styles.assignmentActions}>
-                      <Button
-                        compact
-                        mode={item.assignmentState === 'done' ? 'contained' : 'outlined'}
+                    {mode === 'leader-inbox' && item.assignmentState ? (
+                      <View style={styles.assignmentActions}>
+                        <Button compact mode="outlined" onPress={() => onOpenReassignAssignment(item)}>
+                          Reassign
+                        </Button>
+                      </View>
+                    ) : null}
+                    {mode === 'worker-history' && item.assignmentState ? (
+                      <View style={styles.assignmentActions}>
+                        <Button
+                          compact
+                          mode={item.assignmentState === 'done' ? 'contained' : 'outlined'}
                           onPress={() => {
                             void onUpdateAssignmentState(item.id, 'done').catch((error: unknown) => {
                               console.warn('Assignment update failed', error);
                             });
                           }}
-                      >
-                        Done
-                      </Button>
-                      <Button
-                        compact
-                        mode={item.assignmentState === 'needs_review' ? 'contained' : 'outlined'}
+                        >
+                          Done
+                        </Button>
+                        <Button
+                          compact
+                          mode={item.assignmentState === 'needs_review' ? 'contained' : 'outlined'}
                           onPress={() => {
                             void onUpdateAssignmentState(item.id, 'needs_review').catch((error: unknown) => {
                               console.warn('Assignment update failed', error);
                             });
                           }}
-                      >
-                        Review
-                      </Button>
-                    </View>
-                  ) : null}
-                </View>
-                <StatusChip status={item.parseStatus === 'parsed' ? 'parsed' : 'idle'} />
-              </Surface>
+                        >
+                          Review
+                        </Button>
+                      </View>
+                    ) : null}
+                  </View>
+                  <StatusChip status={item.parseStatus === 'parsed' ? 'parsed' : 'idle'} />
+                </Surface>
               </Pressable>
             </Animated.View>
           ))}
@@ -528,17 +526,17 @@ function AssignmentDetailScreen({
       <ScreenShell>
         <Surface elevation={2} style={[styles.detailHero, { backgroundColor: theme.colors.surfaceContainerHigh }]}>
           <Text style={styles.screenKicker} variant="labelSmall">
-            Assignment State
+            Needs review
           </Text>
           <Text variant="headlineSmall">Mark as needs review?</Text>
           <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
-            Use this when contact details are incomplete or a Team Leader needs to help.
+            Use this when details are missing or a team lead should check the card.
           </Text>
         </Surface>
         <Surface elevation={1} style={[styles.detailPanel, { backgroundColor: theme.colors.surfaceContainer }]}>
           <DetailField label="Assignment" value={getTeamInboxItemTitle(item)} />
-          <DetailField label="Worker" value={memberLabel ?? item.assignedToUserId ?? 'Current Worker'} />
-          <DetailField label="Team" value={item.teamId ?? 'Active Team'} />
+          <DetailField label="Assigned to" value={getMemberLabel(memberLabel)} />
+          <DetailField label="Team" value="Active team" />
         </Surface>
         <View style={styles.detailActions}>
           <Button
@@ -563,11 +561,18 @@ function AssignmentDetailScreen({
   return (
     <ScreenShell>
       <Surface elevation={2} style={[styles.detailHero, { backgroundColor: theme.colors.surfaceContainerHigh }]}>
-        <Button compact icon="arrow-left" mode="text" onPress={onBack}>
-          Back
-        </Button>
+        <View style={styles.detailHeroTopRow}>
+          <Button compact icon="arrow-left" mode="text" onPress={onBack}>
+            Back
+          </Button>
+          <View style={[styles.historyHeroBadge, { backgroundColor: theme.colors.surfaceContainerHighest }]}>
+            <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelSmall">
+              {item.assignmentState ? 'Assigned card' : 'Team inbox'}
+            </Text>
+          </View>
+        </View>
         <Text style={styles.screenKicker} variant="labelSmall">
-          {item.assignmentState ? 'Assignment' : 'Unassigned scan'}
+          {item.assignmentState ? 'Assigned card' : 'New card'}
         </Text>
         <Text variant="headlineSmall">{getTeamInboxItemTitle(item)}</Text>
         <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
@@ -584,9 +589,9 @@ function AssignmentDetailScreen({
       </Surface>
 
       <Surface elevation={1} style={[styles.detailPanel, { backgroundColor: theme.colors.surfaceContainer }]}>
-        <DetailField label="Assignment State" value={item.assignmentState ? item.assignmentState.replace('_', ' ') : 'Team Inbox'} />
-        <DetailField label="Captured By" value={item.capturedByUserId} />
-        <DetailField label="Visible To" value={item.assignmentState ? memberLabel ?? item.assignedToUserId ?? 'Worker' : 'Team Leaders'} />
+        <DetailField label="Status" value={getAssignmentLabel(item)} />
+        <DetailField label="Captured by" value="Team member" />
+        <DetailField label="Visible to" value={item.assignmentState ? getMemberLabel(memberLabel) : 'Team leads'} />
       </Surface>
 
       <View style={styles.detailActions}>
@@ -609,7 +614,7 @@ function AssignmentDetailScreen({
         ) : null}
         {mode === 'leader-inbox' && item.assignmentState ? (
           <Button mode="contained" onPress={() => onOpenReassignAssignment(item)}>
-            Reassign Assignment
+            Reassign card
           </Button>
         ) : null}
       </View>
@@ -645,19 +650,19 @@ function TeamCaptureConfirmScreen({
     <ScreenShell>
       <Surface elevation={2} style={[styles.detailHero, { backgroundColor: theme.colors.surfaceContainerHigh }]}>
         <Text style={styles.screenKicker} variant="labelSmall">
-          First scan after switching Team
+          Confirm team
         </Text>
         <Text variant="headlineSmall">Save this card to {activeTeamName}?</Text>
         <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
-          Confirming prevents cards from being saved to the wrong Team.
+          This helps prevent cards from going to the wrong team.
         </Text>
       </Surface>
       <View style={styles.detailActions}>
         <Button mode="contained" onPress={onConfirm} testID="confirm-team-capture-button">
-          Confirm Team and capture
+          Confirm and scan
         </Button>
         <Button mode="outlined" onPress={onSwitchTeam}>
-          Switch Team
+          Switch team
         </Button>
       </View>
     </ScreenShell>
@@ -683,21 +688,21 @@ function BatchApprovalConfirmScreen({
         <Text style={styles.screenKicker} variant="labelSmall">
           Final approval
         </Text>
-        <Text variant="headlineSmall">Create {scanCount} Assignments?</Text>
+        <Text variant="headlineSmall">Assign {scanCount} card{scanCount === 1 ? '' : 's'}?</Text>
         <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
-          Workers will only see scans placed into their Assignments. Team Leaders keep full visibility.
+          Each team member will only see the cards assigned to them. Team leads can still see the full list.
         </Text>
       </Surface>
       <MetricRail
         items={[
           { label: 'Scans', value: scanCount },
-          { label: 'Workers', tone: 'tertiary', value: workerCount },
-          { label: 'State', tone: 'secondary', value: scanCount > 0 ? 1 : 0 }
+          { label: 'Members', tone: 'tertiary', value: workerCount },
+          { label: 'Ready', tone: 'secondary', value: scanCount > 0 ? 1 : 0 }
         ]}
       />
       <View style={styles.detailActions}>
         <Button mode="contained" onPress={onApprove} testID="confirm-approve-assignment-batch-button">
-          Approve Batch Assignment
+          Assign cards
         </Button>
         <Button mode="outlined" onPress={onBack}>
           Keep editing
@@ -725,23 +730,23 @@ function OcrReviewScreen({
     <ScreenShell>
       <Surface elevation={2} style={[styles.detailHero, { backgroundColor: theme.colors.surfaceContainerHigh }]}>
         <Text style={styles.screenKicker} variant="labelSmall">
-          {activeTeamName ?? 'Active Team'}
+          {activeTeamName ?? 'Active team'}
         </Text>
         <Text variant="headlineSmall">Review scan</Text>
         <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
-          Check the on-device OCR before saving this card to the Team Inbox.
+          Check what the app read from the card before saving it to the team inbox.
         </Text>
       </Surface>
 
       <Surface elevation={1} style={[styles.detailPanel, { backgroundColor: theme.colors.surfaceContainer }]}>
-        <DetailField label="Name candidate" value={previewLines[0] ?? 'Not found'} />
-        <DetailField label="Company candidate" value={previewLines[1] ?? 'Not found'} />
-        <DetailField label="Raw OCR" value={review.rawText} />
+        <DetailField label="Possible name" value={previewLines[0] ?? 'Not found'} />
+        <DetailField label="Possible company" value={previewLines[1] ?? 'Not found'} />
+        <DetailField label="Text found on card" value={review.rawText} />
       </Surface>
 
       <View style={styles.detailActions}>
         <Button mode="contained" onPress={onSave} testID="save-ocr-review-button">
-          Save to Team Inbox
+          Save to team inbox
         </Button>
         <Button mode="outlined" onPress={onRetake}>
           Retake
@@ -908,11 +913,11 @@ function TeamScreen({
           </View>
           <View style={styles.profileHeroCopy}>
             <Text style={styles.screenKicker} variant="labelSmall">
-              Memberships
+              Team
             </Text>
             <Text variant="headlineMedium">Team</Text>
             <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
-              Manage the active Team, Workers, Team Leaders, and pending invites.
+              Manage teams, members, team leads, and pending invites.
             </Text>
           </View>
           <View style={styles.profileStatusWrap}>
@@ -937,7 +942,7 @@ function TeamScreen({
           style={[styles.managementPanel, { backgroundColor: theme.colors.surfaceContainer }]}
         >
           <View style={styles.teamSectionHeader}>
-            <Text variant="titleMedium">{hasActiveTeam ? 'Create another Team' : 'Create your first Team'}</Text>
+            <Text variant="titleMedium">{hasActiveTeam ? 'Create another team' : 'Create your first team'}</Text>
             <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
               {hasActiveTeam
                 ? 'Add a new workspace if you need a separate group.'
@@ -980,7 +985,7 @@ function TeamScreen({
               style={[styles.teamSummaryPanel, { backgroundColor: theme.colors.surfaceContainer }]}
             >
               <View style={styles.teamSectionHeader}>
-              <Text variant="titleMedium">Active Team</Text>
+                <Text variant="titleMedium">Active team</Text>
                 <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
                   {activeTeamName
                     ? `Active team: ${activeTeamName}`
@@ -999,7 +1004,7 @@ function TeamScreen({
               style={[styles.managementPanel, { backgroundColor: theme.colors.surfaceContainer }]}
             >
               <View style={styles.teamSectionHeader}>
-              <Text variant="titleMedium">Pending Invite</Text>
+                <Text variant="titleMedium">Pending invite</Text>
                 <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
                   Send access to someone who should join this team.
                 </Text>
@@ -1025,7 +1030,7 @@ function TeamScreen({
                 onPress={handleCreateInvite}
                 testID="create-invite-button"
               >
-                Send Invite
+                Send invite
               </Button>
               {inviteError ? (
                 <Text style={{ color: theme.colors.error }} variant="bodySmall">
@@ -1039,7 +1044,7 @@ function TeamScreen({
               ) : null}
               {teamPendingInvites.length > 0 ? (
                 <View style={styles.memberList}>
-                  <Text variant="titleSmall">Pending Invites</Text>
+                  <Text variant="titleSmall">Pending invites</Text>
                   {teamPendingInvites.map((invite) => (
                     <Surface
                       key={invite.id}
@@ -1049,7 +1054,7 @@ function TeamScreen({
                       <View style={styles.memberRowCopy}>
                         <Text variant="titleSmall">{invite.invitedEmail}</Text>
                         <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
-                          Worker invite
+                          Team member invite
                         </Text>
                       </View>
                       <Button compact disabled mode="outlined">
@@ -1070,7 +1075,7 @@ function TeamScreen({
               <View style={styles.teamSectionHeader}>
                 <Text variant="titleMedium">Members</Text>
                 <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
-                  Promote members to team leaders and track who has access.
+                  Promote members to team leads and track who has access.
                 </Text>
               </View>
               {isTeamMembersLoading ? (
@@ -1093,7 +1098,7 @@ function TeamScreen({
                           <Text variant="titleSmall">{member.email}</Text>
                           <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
                             {isSelf ? 'You' : 'Member'}
-                            {member.isLeader ? ' · Team leader' : ''}
+                            {member.isLeader ? ' · Team lead' : ''}
                           </Text>
                         </View>
                         {member.isLeader ? (
@@ -1136,7 +1141,7 @@ function TeamScreen({
             style={[styles.managementPanel, { backgroundColor: theme.colors.surfaceContainer }]}
           >
             <View style={styles.teamSectionHeader}>
-              <Text variant="titleMedium">Switch Team</Text>
+              <Text variant="titleMedium">Switch team</Text>
               <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
                 Tap a team to make it active.
               </Text>
@@ -1227,10 +1232,10 @@ function ProfileScreen({
             <List.Icon color={theme.colors.onTertiaryContainer} icon="account-circle" />
           </View>
           <View style={styles.profileHeroCopy}>
-          <Text style={styles.screenKicker} variant="labelSmall">
-            Account
-          </Text>
-          <Text variant="headlineMedium">Profile</Text>
+            <Text style={styles.screenKicker} variant="labelSmall">
+              Account
+            </Text>
+            <Text variant="headlineMedium">Profile</Text>
             <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
               Signed in as {userEmail ?? 'your account'}.
             </Text>
@@ -1380,7 +1385,12 @@ function CameraScreen({
         <>
           <CameraView facing="back" ref={cameraRef} style={StyleSheet.absoluteFill} testID="camera-viewfinder" />
           <View style={styles.viewfinderScrim} pointerEvents="none">
-            <View style={[styles.viewfinderFrame, { borderColor: theme.colors.primary }]} />
+            <View style={styles.viewfinderPanel}>
+              <Text style={{ color: theme.colors.onSurfaceVariant, marginBottom: 12 }} variant="labelMedium">
+                Align the card inside the frame
+              </Text>
+              <View style={[styles.viewfinderFrame, { borderColor: theme.colors.primary }]} />
+            </View>
           </View>
           <Animated.View
             entering={FadeInDown.delay(80).duration(motion.duration.medium1).easing(motion.easing.emphasized)}
@@ -1430,8 +1440,8 @@ function MetricRail({ items }: { items: MetricRailItem[] }) {
   const theme = useAppTheme();
 
   return (
-    <Surface elevation={1} style={[styles.metricRail, { backgroundColor: theme.colors.surfaceContainer }]}>
-      {items.map((item, index) => {
+    <View style={styles.metricRail}>
+      {items.map((item) => {
         const toneColor = item.tone === 'error'
           ? theme.colors.error
           : item.tone === 'secondary'
@@ -1441,12 +1451,10 @@ function MetricRail({ items }: { items: MetricRailItem[] }) {
               : theme.colors.primary;
 
         return (
-          <View
+          <Surface
+            elevation={0}
             key={item.label}
-            style={[
-              styles.metricRailItem,
-              index < items.length - 1 ? styles.metricRailItemDivider : null
-            ]}
+            style={[styles.metricRailItem, { backgroundColor: theme.colors.surfaceContainer }]}
           >
             <Text style={{ color: toneColor }} variant="headlineSmall">
               {item.value}
@@ -1454,10 +1462,10 @@ function MetricRail({ items }: { items: MetricRailItem[] }) {
             <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelLarge">
               {item.label}
             </Text>
-          </View>
+          </Surface>
         );
       })}
-    </Surface>
+    </View>
   );
 }
 
@@ -1924,7 +1932,7 @@ function ScannerApp({
             style={[
               styles.cameraFab,
               {
-                backgroundColor: theme.colors.primaryContainer,
+                backgroundColor: theme.colors.onSurface,
                 bottom: insets.bottom + 78
               }
             ]}
@@ -2216,6 +2224,7 @@ const styles = StyleSheet.create({
   },
   cameraFab: {
     alignSelf: 'center',
+    elevation: 8,
     position: 'absolute'
   },
   cameraTopBar: {
@@ -2249,6 +2258,11 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 10
   },
+  detailHeroTopRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between'
+  },
   detailField: {
     borderBottomColor: 'rgba(127, 127, 127, 0.22)',
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -2266,6 +2280,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 8
   },
+  historyAvatar: {
+    alignItems: 'center',
+    borderRadius: 8,
+    height: 52,
+    justifyContent: 'center',
+    width: 52
+  },
+  historyHeroActions: {
+    alignItems: 'flex-end',
+    gap: 10
+  },
+  historyHeroBadge: {
+    alignItems: 'center',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6
+  },
   historyFilterPill: {
     alignItems: 'center',
     borderRadius: 999,
@@ -2282,13 +2313,19 @@ const styles = StyleSheet.create({
   },
   historyHero: {
     alignItems: 'center',
-    borderRadius: 28,
+    borderRadius: 8,
     flexDirection: 'row',
     gap: 16,
     padding: 18
   },
   historyHeroCopy: {
     flex: 1
+  },
+  historyMetaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 4
   },
   historyList: {
     gap: 10
@@ -2317,18 +2354,18 @@ const styles = StyleSheet.create({
     padding: 18
   },
   metricRail: {
-    borderRadius: 8,
-    flexDirection: 'row'
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10
   },
   metricRailItem: {
-    flex: 1,
+    borderRadius: 8,
     gap: 2,
+    flexBasis: '31%',
+    flexGrow: 1,
+    minWidth: 94,
     paddingHorizontal: 14,
     paddingVertical: 16
-  },
-  metricRailItemDivider: {
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderRightColor: 'rgba(127, 127, 127, 0.22)'
   },
   profileAvatar: {
     alignItems: 'center',
@@ -2375,6 +2412,7 @@ const styles = StyleSheet.create({
   },
   teamStatsRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 10
   },
   teamSummaryHeader: {
@@ -2483,6 +2521,14 @@ const styles = StyleSheet.create({
     maxWidth: 360,
     opacity: 0.92,
     width: '82%'
+  },
+  viewfinderPanel: {
+    alignItems: 'center',
+    borderRadius: 18,
+    backgroundColor: 'rgba(0,0,0,0.18)',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    width: '88%'
   },
   viewfinderScrim: {
     alignItems: 'center',

@@ -7,7 +7,7 @@ import Animated, {
   withSequence,
   withTiming
 } from 'react-native-reanimated';
-import { Text } from 'react-native-paper';
+import { Text } from '../design/openDesign';
 
 import { useAppTheme } from '../theme/materialTheme';
 import { motion } from '../theme/motion';

@@ -1,6 +1,7 @@
 # Secrets
 .env
 .env.local
+*.jks
 
 # macOS
 .DS_Store

@@ -75,9 +75,9 @@ export function CaptureButton({ disabled, onCapture, takePicture }: CaptureButto
 const styles = StyleSheet.create({
   captureButton: {
     alignItems: 'center',
-    borderRadius: 40,
-    borderWidth: 5,
-    height: 80,
+    borderRadius: 44,
+    borderWidth: 6,
+    height: 88,
     justifyContent: 'center',
     shadowColor: '#000000',
     shadowOffset: {
@@ -97,8 +97,8 @@ const styles = StyleSheet.create({
     opacity: 0.45
   },
   captureButtonInner: {
-    borderRadius: 29,
-    height: 58,
-    width: 58
+    borderRadius: 32,
+    height: 64,
+    width: 64
   }
 });

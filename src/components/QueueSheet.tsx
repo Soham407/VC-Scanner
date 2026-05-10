@@ -1,7 +1,7 @@
 import { BottomSheetFlatList, BottomSheetModal, BottomSheetView } from '@gorhom/bottom-sheet';
 import { forwardRef, useMemo, type ForwardedRef } from 'react';
 import { Image, StyleSheet, View } from 'react-native';
-import { Button, Chip, Text } from 'react-native-paper';
+import { Button, Chip, Text } from '../design/openDesign';
 
 import type { ScannerQueueItem } from '../../store/scanner';
 import { useAppTheme } from '../theme/materialTheme';
@@ -29,25 +29,25 @@ function QueueSheetImpl(
     <BottomSheetModal ref={ref} snapPoints={snapPoints}>
       <BottomSheetView style={[styles.container, { backgroundColor: theme.colors.surface }]}>
         <Text style={styles.title} variant="titleLarge">
-          Background saves
+          Saving cards
         </Text>
         <Text style={{ color: theme.colors.onSurfaceVariant, marginBottom: 8 }} variant="bodyMedium">
-          These scans will finish uploading as soon as connectivity is available.
+          These cards will finish saving when the connection is available.
         </Text>
         <BottomSheetFlatList
           data={items}
           ListEmptyComponent={
             <Text style={{ color: theme.colors.onSurfaceVariant, paddingTop: 12 }} variant="bodyMedium">
-              Nothing is waiting to sync right now.
+              Nothing is waiting to save right now.
             </Text>
           }
           keyExtractor={(item) => item.id}
           renderItem={({ item }) => (
-            <View style={styles.row}>
+            <View style={[styles.row, { backgroundColor: theme.colors.surfaceContainer }]}>
               <Image source={{ uri: item.imagePath }} style={styles.thumb} />
               <View style={styles.meta}>
-                <Text numberOfLines={1} variant="labelLarge">
-                  Business card
+                <Text numberOfLines={1} variant="titleSmall">
+                  Card save
                 </Text>
                 <Chip compact mode="flat" style={styles.chip}>{statusCopy[item.status]}</Chip>
                 {item.error ? (
@@ -93,7 +93,9 @@ const styles = StyleSheet.create({
   row: {
     alignItems: 'center',
     flexDirection: 'row',
-    paddingVertical: 10
+    borderRadius: 8,
+    marginBottom: 10,
+    padding: 12
   },
   thumb: {
     borderRadius: 8,

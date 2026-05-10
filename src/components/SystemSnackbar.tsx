@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { Snackbar } from 'react-native-paper';
+import { Snackbar } from '../design/openDesign';
 
 import type { SystemNotice } from '../../store/scanner';
 

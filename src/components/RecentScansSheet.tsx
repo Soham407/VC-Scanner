@@ -1,7 +1,7 @@
 import { BottomSheetFlatList, BottomSheetModal, BottomSheetView } from '@gorhom/bottom-sheet';
 import { forwardRef, useMemo, type ForwardedRef } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
-import { Chip, Text as PaperText } from 'react-native-paper';
+import { Chip, Text as PaperText } from '../design/openDesign';
 
 import type { ScannerHistoryItem } from '../../store/scanner';
 import { useAppTheme } from '../theme/materialTheme';
@@ -34,7 +34,7 @@ function RecentScansSheetImpl(
             const secondaryText = item.parsed.companyName ?? item.parsed.jobTitle ?? item.rawText.split('\n')[0] ?? '';
 
             return (
-              <View style={styles.row}>
+              <View style={[styles.row, { backgroundColor: theme.colors.surfaceContainer }]}>
                 <Image source={{ uri: item.imagePath }} style={styles.thumb} />
                 <View style={styles.meta}>
                   <PaperText numberOfLines={1} variant="titleSmall">{primaryText}</PaperText>
@@ -45,7 +45,7 @@ function RecentScansSheetImpl(
                   >
                     {secondaryText}
                   </PaperText>
-                  <Chip compact style={styles.chip}>{item.parseStatus}</Chip>
+                  <Chip compact style={styles.chip}>{item.parseStatus === 'parsed' ? 'Saved' : 'Review'}</Chip>
                 </View>
                 <View
                   style={[styles.timestampPill, { backgroundColor: theme.colors.surfaceContainerHigh }]}
@@ -83,6 +83,9 @@ const styles = StyleSheet.create({
   row: {
     alignItems: 'center',
     flexDirection: 'row',
+    borderRadius: 8,
+    marginBottom: 10,
+    padding: 12,
     paddingVertical: 10
   },
   thumb: {

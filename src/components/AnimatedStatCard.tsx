@@ -7,7 +7,7 @@ import Animated, {
   useSharedValue,
   withSpring
 } from 'react-native-reanimated';
-import { Surface, Text } from 'react-native-paper';
+import { Surface, Text } from '../design/openDesign';
 
 import { useAppTheme } from '../theme/materialTheme';
 import { motion } from '../theme/motion';
@@ -128,6 +128,6 @@ const styles = StyleSheet.create({
   },
   wrap: {
     flex: 1,
-    minWidth: 132
+    minWidth: 108
   }
 });
