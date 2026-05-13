@@ -14,12 +14,14 @@ describe('teams', () => {
 
   it('creates teams through the RPC that also creates creator membership', async () => {
     (supabase.rpc as jest.Mock).mockResolvedValue({
-      data: {
-        created_at: '2026-05-13T12:00:00Z',
-        created_by: 'user-1',
-        id: 'team-1',
-        name: 'Main Team'
-      },
+      data: [
+        {
+          created_at: '2026-05-13T12:00:00Z',
+          created_by: 'user-1',
+          id: 'team-1',
+          name: 'Main Team'
+        }
+      ],
       error: null
     });
 

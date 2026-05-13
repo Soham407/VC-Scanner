@@ -40,10 +40,12 @@ describe('teamAssignments', () => {
 
   it('creates a team assignment batch through RPC', async () => {
     (supabase.rpc as jest.Mock).mockResolvedValue({
-      data: {
-        batch_id: 'batch-1',
-        scan_count: 3
-      },
+      data: [
+        {
+          batch_id: 'batch-1',
+          scan_count: 3
+        }
+      ],
       error: null
     });
 
@@ -59,9 +61,11 @@ describe('teamAssignments', () => {
 
   it('approves a team assignment batch through RPC', async () => {
     (supabase.rpc as jest.Mock).mockResolvedValue({
-      data: {
-        assigned_count: 3
-      },
+      data: [
+        {
+          assigned_count: 3
+        }
+      ],
       error: null
     });
 

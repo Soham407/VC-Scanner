@@ -9,6 +9,10 @@ type ApproveBatchRpcResult = {
   assigned_count: number;
 };
 
+function firstRow<T>(value: T | T[] | null): T | null {
+  return Array.isArray(value) ? value[0] ?? null : value;
+}
+
 export type CreatedTeamAssignmentBatch = {
   batchId: string;
   scanCount: number;
@@ -42,7 +46,7 @@ export async function createTeamAssignmentBatch(
     throw new Error(error.message);
   }
 
-  const row = data as CreateBatchRpcResult | null;
+  const row = firstRow(data as CreateBatchRpcResult | CreateBatchRpcResult[] | null);
   if (!row || !row.batch_id) {
     throw new Error('Batch creation returned no row');
   }
@@ -104,7 +108,7 @@ export async function approveTeamAssignmentBatch(
     throw new Error(error.message);
   }
 
-  const row = data as ApproveBatchRpcResult | null;
+  const row = firstRow(data as ApproveBatchRpcResult | ApproveBatchRpcResult[] | null);
   if (!row) {
     throw new Error('Batch approval returned no row');
   }

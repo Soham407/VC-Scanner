@@ -108,10 +108,11 @@ export async function createTeam(name: string): Promise<AccessibleTeam> {
     team_name: trimmedName
   });
   if (error) throw new Error(error.message);
-  if (!data) throw new Error('Team creation returned no row');
 
-  const team = mapTeam(data as TeamRow);
-  return team;
+  const row = firstRow(data as TeamRow | TeamRow[] | null);
+  if (!row) throw new Error('Team creation returned no row');
+
+  return mapTeam(row);
 }
 
 export async function getActiveTeamId(userId: string): Promise<string | null> {

@@ -23,6 +23,10 @@ function mapTeamRow(row: TeamRow): AccessibleTeam {
   };
 }
 
+function firstRow<T>(value: T | T[] | null): T | null {
+  return Array.isArray(value) ? value[0] ?? null : value;
+}
+
 export async function loadAccessibleTeams(): Promise<AccessibleTeam[]> {
   const { data, error } = await supabase
     .from('teams')
@@ -54,5 +58,10 @@ export async function createTeam(name: string): Promise<AccessibleTeam> {
     throw new Error('Team creation returned no row');
   }
 
-  return mapTeamRow(data as TeamRow);
+  const row = firstRow(data as TeamRow | TeamRow[] | null);
+  if (!row) {
+    throw new Error('Team creation returned no row');
+  }
+
+  return mapTeamRow(row);
 }
