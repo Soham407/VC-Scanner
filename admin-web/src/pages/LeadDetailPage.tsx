@@ -59,7 +59,8 @@ export function LeadDetailPage({
       <div className="page-header">
         <div>
           <div className="eyebrow">Lead detail</div>
-          <h2>{lead.fullName ?? 'Unnamed lead'}</h2>
+          <h2>{lead.companyName ?? lead.fullName ?? 'Unnamed company'}</h2>
+          <p className="muted">{lead.fullName ?? 'No contact name'}</p>
         </div>
         <button className="ghost-button" onClick={() => navigate(-1)}>
           Back

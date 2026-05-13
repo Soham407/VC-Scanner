@@ -60,16 +60,16 @@ export function LeadList({
         {!loading && filtered.length === 0 ? <div className="card">{emptyText}</div> : null}
         {filtered.map((lead) => (
           <article className="card lead-row" key={lead.id}>
-            <div className="lead-badge">{initials(lead.fullName ?? lead.companyName ?? lead.email)}</div>
+            <div className="lead-badge">{initials(lead.companyName ?? lead.fullName ?? lead.email)}</div>
             <div className="lead-content">
               <div className="card-top">
-                <strong>{lead.fullName ?? 'Unnamed lead'}</strong>
+                <strong>{lead.companyName ?? lead.fullName ?? 'Unnamed company'}</strong>
                 <StatusPill tone={lead.assignmentState === 'done' ? 'success' : lead.assignmentState === 'needs_review' ? 'warning' : 'neutral'}>
                   {stateLabel(lead.assignmentState)}
                 </StatusPill>
               </div>
               <p className="muted">
-                {lead.companyName ?? 'No company'} <span aria-hidden="true">·</span> {lead.email ?? 'No email'} <span aria-hidden="true">·</span> {formatDate(lead.createdAt)}
+                {lead.fullName ?? 'No contact'} <span aria-hidden="true">·</span> {lead.email ?? 'No email'} <span aria-hidden="true">·</span> {formatDate(lead.createdAt)}
               </p>
             </div>
             <Link className="ghost-button" to={`/leads/${lead.id}`}>

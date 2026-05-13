@@ -81,7 +81,7 @@ export function AssignPage({ teamId }: { teamId: string }) {
               <div className="list compact">
                 {batch.items.map((item) => (
                   <div className="mini-row" key={item.scannedLeadId}>
-                    <span>{leadById.get(item.scannedLeadId)?.fullName ?? leadById.get(item.scannedLeadId)?.companyName ?? item.scannedLeadId}</span>
+                    <span>{leadById.get(item.scannedLeadId)?.companyName ?? leadById.get(item.scannedLeadId)?.fullName ?? item.scannedLeadId}</span>
                     <button className="ghost-button" disabled={busy} onClick={async () => { await removeBatchItem(batch.batchId, item.scannedLeadId); await refresh(); }}>
                       Remove
                     </button>
@@ -120,7 +120,7 @@ export function AssignPage({ teamId }: { teamId: string }) {
           <div className="list compact">
             {unassignedLeads.map((lead) => (
               <div className="mini-row" key={lead.id}>
-                <span>{lead.fullName ?? lead.companyName ?? lead.id}</span>
+                <span>{lead.companyName ?? lead.fullName ?? lead.id}</span>
                 <button
                   className="ghost-button"
                   disabled={!batch || assignedIds.has(lead.id)}
@@ -148,13 +148,13 @@ export function AssignPage({ teamId }: { teamId: string }) {
           {assignedLeads.map((lead) => (
             <div className="mini-row reassignment-row" key={lead.id}>
               <div>
-                <strong>{lead.fullName ?? lead.companyName ?? 'Unnamed lead'}</strong>
+                <strong>{lead.companyName ?? lead.fullName ?? 'Unnamed company'}</strong>
                 <p className="muted">
-                  {lead.companyName ?? 'No company'} · {lead.assignmentState ?? 'assigned'}
+                  {lead.fullName ?? 'No contact'} · {lead.assignmentState ?? 'assigned'}
                 </p>
               </div>
               <select
-                aria-label={`Reassign ${lead.fullName ?? lead.id}`}
+                aria-label={`Reassign ${lead.companyName ?? lead.fullName ?? lead.id}`}
                 value={lead.assignedToUserId ?? ''}
                 disabled={busy}
                 onChange={async (event) => {
