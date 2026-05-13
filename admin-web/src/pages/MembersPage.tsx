@@ -34,7 +34,7 @@ export function MembersPage({ teamId }: { teamId: string }) {
       <div className="page-header">
         <div>
           <div className="eyebrow">Members</div>
-          <h2>Team members and roles</h2>
+          <h2>Team roles</h2>
         </div>
       </div>
 
@@ -49,7 +49,7 @@ export function MembersPage({ teamId }: { teamId: string }) {
           <div className="mini-row" key={member.userId}>
             <div>
               <strong>{member.email}</strong>
-              <p className="muted">{member.isLeader ? 'Team leader' : 'Worker'}</p>
+              <p className="muted">{member.isLeader ? 'Team Leader' : 'Worker'}</p>
             </div>
             <button
               className="ghost-button"

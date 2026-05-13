@@ -40,6 +40,35 @@ export async function loadAccessibleTeams(): Promise<AccessibleTeam[]> {
   return ((data ?? []) as TeamRow[]).map(mapTeamRow);
 }
 
+export async function loadCurrentTeam(userId: string): Promise<AccessibleTeam | null> {
+  const { data: membershipData, error: membershipError } = await supabase
+    .from('team_memberships')
+    .select('team_id')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (membershipError) {
+    throw new Error(membershipError.message);
+  }
+
+  const teamId = (membershipData as { team_id: string } | null)?.team_id ?? null;
+  if (!teamId) {
+    return null;
+  }
+
+  const { data: teamData, error: teamError } = await supabase
+    .from('teams')
+    .select('id, name, created_by, created_at')
+    .eq('id', teamId)
+    .maybeSingle();
+
+  if (teamError) {
+    throw new Error(teamError.message);
+  }
+
+  return teamData ? mapTeamRow(teamData as TeamRow) : null;
+}
+
 export async function createTeam(name: string): Promise<AccessibleTeam> {
   const trimmedName = name.trim();
   if (!trimmedName) {

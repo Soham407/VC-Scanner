@@ -106,7 +106,7 @@ export function LeadDetailPage({
             <div className="card stack">
               <div className="eyebrow">Assignment</div>
               <p className="muted">
-                Assigned to: {members.find((member) => member.userId === lead.assignedToUserId)?.email ?? (lead.assignedToUserId ? 'Unknown team member' : 'Unassigned')}
+                Assigned to: {members.find((member) => member.userId === lead.assignedToUserId)?.email ?? (lead.assignedToUserId ? 'Unknown Worker' : 'Unassigned')}
               </p>
               <p className="muted">State: {lead.assignmentState ?? 'unassigned'}</p>
 
@@ -189,7 +189,7 @@ export function LeadDetailPage({
               <EmptyState title="No card image">This lead has no available card image or the image link could not be opened.</EmptyState>
             )}
             <p className="muted">Captured: {formatDate(lead.createdAt)}</p>
-            <p className="muted">Capture workspace: {lead.teamId ? 'Team' : 'Personal'}</p>
+            <p className="muted">Saved to: {lead.teamId ? 'Company team' : 'Personal scans'}</p>
             <details className="raw-text">
               <summary>Raw OCR</summary>
               <pre>{lead.rawText ?? 'Empty'}</pre>

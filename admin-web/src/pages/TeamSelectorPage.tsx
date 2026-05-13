@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Plus, Check } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 
-import { createTeam, loadAccessibleTeams, setActiveTeamId } from '../lib/api';
+import { createTeam, loadAccessibleTeams } from '../lib/api';
 import { formatDate } from '../lib/format';
 import type { AccessibleTeam } from '../lib/types';
 import { EmptyState } from '../components/EmptyState';
@@ -18,7 +18,6 @@ export function TeamSelectorPage({
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [selectingTeamId, setSelectingTeamId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
 
@@ -38,75 +37,67 @@ export function TeamSelectorPage({
     void refresh();
   }, []);
 
+  const currentTeam = activeTeamId ? teams.find((team) => team.id === activeTeamId) ?? null : null;
+
   return (
     <section className="page-stack">
       <div className="page-header">
         <div>
           <div className="eyebrow">Workspace</div>
-          <h2>Select a team</h2>
+          <h2>{currentTeam ? 'Company team' : 'Create your first team'}</h2>
         </div>
-        <form
-          className="inline-form"
-          onSubmit={async (event) => {
-            event.preventDefault();
-            setBusy(true);
-            setError(null);
-            try {
-              const team = await createTeam(name);
-              setName('');
-              await onTeamSelected(team.id);
-              navigate('/inbox');
-            } catch (err) {
-              setError(err instanceof Error ? err.message : 'Failed to create team');
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="New team name" />
-          <button className="primary-button" disabled={busy || !name.trim()}>
-            <Plus size={16} />
-            {busy ? 'Creating...' : 'Create'}
-          </button>
-        </form>
+        {!loading && !currentTeam ? (
+          <form
+            className="inline-form"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              setBusy(true);
+              setError(null);
+              try {
+                const team = await createTeam(name);
+                setName('');
+                await onTeamSelected(team.id);
+                navigate('/inbox');
+              } catch (err) {
+                setError(err instanceof Error ? err.message : 'Failed to create team');
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="New team name" />
+            <button className="primary-button" disabled={busy || !name.trim()}>
+              <Plus size={16} />
+              {busy ? 'Creating...' : 'Create'}
+            </button>
+          </form>
+        ) : null}
       </div>
 
       {error ? <p className="error-text">{error}</p> : null}
 
-      <div className="grid-cards">
-        {loading ? <div className="card loading-card">Loading teams...</div> : null}
-        {!loading && teams.length === 0 ? (
-          <div className="card">
-            <EmptyState title="No teams available">Create a team to enable shared scanning, member invites, and assignment review.</EmptyState>
+      {loading ? <div className="card loading-card">Loading team...</div> : null}
+
+      {!loading && currentTeam ? (
+        <div className="card stack">
+          <div className="card-top">
+            <strong>{currentTeam.name}</strong>
+            <span>Company team</span>
           </div>
-        ) : null}
-        {teams.map((team) => (
-          <button
-            key={team.id}
-            className="card card-button"
-            disabled={Boolean(selectingTeamId)}
-            onClick={async () => {
-              setSelectingTeamId(team.id);
-              setError(null);
-              try {
-                await setActiveTeamId(team.id);
-                await onTeamSelected(team.id);
-                navigate('/inbox');
-              } catch (err) {
-                setError(err instanceof Error ? err.message : 'Failed to switch team');
-              } finally {
-                setSelectingTeamId(null);
-              }
-            }}
-          >
-            <div className="card-top">
-              <strong>{team.name}</strong>
-              {team.id === activeTeamId ? <Check size={16} /> : selectingTeamId === team.id ? <span className="muted">Switching...</span> : null}
-            </div>
-            <p className="muted">Created {formatDate(team.createdAt)}</p>
-          </button>
-        ))}
-      </div>
+          <p className="muted">Created {formatDate(currentTeam.createdAt)}</p>
+          <EmptyState title="Team settings">
+            Each user belongs to one company team. Create a new team only for a brand-new company account.
+          </EmptyState>
+        </div>
+      ) : null}
+
+      {!loading && !currentTeam ? (
+        <div className="card">
+          <EmptyState title="No team yet">
+            Create your first team to enable shared scanning, member invites, and assignment review.
+          </EmptyState>
+        </div>
+      ) : null}
     </section>
   );
 }

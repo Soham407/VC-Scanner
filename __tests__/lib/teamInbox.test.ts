@@ -28,7 +28,7 @@ describe('teamInbox', () => {
     return chain;
   }
 
-  it('returns leader inbox rows for all scans in the active team', async () => {
+  it('returns leader inbox rows for all scans in the current company team', async () => {
     const activeTeamQuery = createQueryChain({
       data: { team_id: 'team-1' },
       error: null
@@ -85,7 +85,7 @@ describe('teamInbox', () => {
     });
 
     (supabase.from as jest.Mock).mockImplementation((table: string) => {
-      if (table === 'user_team_contexts') {
+      if (table === 'team_memberships') {
         return {
           select: jest.fn().mockReturnValue(activeTeamQuery)
         };
@@ -113,7 +113,7 @@ describe('teamInbox', () => {
     });
 
     await expect(loadTeamInboxReview('leader-1')).resolves.toEqual({
-      activeTeamId: 'team-1',
+      teamId: 'team-1',
       teamName: 'North Hall',
       items: [
         {
@@ -206,7 +206,7 @@ describe('teamInbox', () => {
     });
 
     (supabase.from as jest.Mock).mockImplementation((table: string) => {
-      if (table === 'user_team_contexts') {
+      if (table === 'team_memberships') {
         return {
           select: jest.fn().mockReturnValue(activeTeamQuery)
         };
@@ -234,7 +234,7 @@ describe('teamInbox', () => {
     });
 
     await expect(loadTeamInboxReview('leader-1')).resolves.toEqual({
-      activeTeamId: 'team-1',
+      teamId: 'team-1',
       teamName: 'North Hall',
       items: [
         {
@@ -308,7 +308,7 @@ describe('teamInbox', () => {
     });
 
     (supabase.from as jest.Mock).mockImplementation((table: string) => {
-      if (table === 'user_team_contexts') {
+      if (table === 'team_memberships') {
         return {
           select: jest.fn().mockReturnValue(activeTeamQuery)
         };
@@ -336,7 +336,7 @@ describe('teamInbox', () => {
     });
 
     await expect(loadTeamInboxReview('worker-7')).resolves.toEqual({
-      activeTeamId: 'team-1',
+      teamId: 'team-1',
       teamName: 'North Hall',
       items: [
         {
@@ -363,7 +363,7 @@ describe('teamInbox', () => {
     });
   });
 
-  it('falls back to personal history when the active team context is stale', async () => {
+  it('falls back to personal history when the current team lookup is stale', async () => {
     const activeTeamQuery = createQueryChain({
       data: { team_id: 'team-missing' },
       error: null
@@ -396,7 +396,7 @@ describe('teamInbox', () => {
     });
 
     (supabase.from as jest.Mock).mockImplementation((table: string) => {
-      if (table === 'user_team_contexts') {
+      if (table === 'team_memberships') {
         return {
           select: jest.fn().mockReturnValue(activeTeamQuery)
         };
@@ -418,7 +418,7 @@ describe('teamInbox', () => {
     });
 
     await expect(loadTeamInboxReview('user-1')).resolves.toEqual({
-      activeTeamId: null,
+      teamId: null,
       teamName: null,
       items: [
         {

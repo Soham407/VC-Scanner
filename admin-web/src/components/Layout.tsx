@@ -38,7 +38,7 @@ export function Layout({
     ...(canManageTeam
       ? [
           {
-            label: 'Team lead',
+            label: 'Team Leader',
             items: [
               { icon: Inbox, label: 'Team Inbox', to: '/inbox' },
               { icon: Settings2, label: 'Assign', to: '/assign' },
@@ -49,7 +49,7 @@ export function Layout({
         ]
       : [])
   ];
-  const workspaceLabel = canManageTeam ? 'Team leader' : hasTeam ? 'Team member' : 'Personal';
+  const workspaceLabel = canManageTeam ? 'Team Leader' : hasTeam ? 'Worker' : 'Personal';
   const userInitial = user?.email?.trim()[0]?.toUpperCase() ?? 'U';
 
   return (
@@ -111,7 +111,7 @@ export function Layout({
           </div>
           <div className="topbar-actions">
             <span className="role-pill">{workspaceLabel}</span>
-            <Link className="ghost-button" to="/teams">Switch team</Link>
+            <Link className="ghost-button" to="/teams">Team settings</Link>
           </div>
         </header>
         {children}

@@ -16,6 +16,7 @@ type ScanHeroCardProps = {
   activeTeamName: string | null;
   failedCount: number;
   hasTeamWorkspace: boolean;
+  historyLabel: string;
   inFlightCount: number;
   savedCount: number;
   status: OcrStatus;
@@ -69,6 +70,7 @@ export function ScanHeroCard({
   activeTeamName,
   failedCount,
   hasTeamWorkspace,
+  historyLabel,
   inFlightCount,
   onOpenCamera,
   onOpenHistory,
@@ -91,7 +93,7 @@ export function ScanHeroCard({
         <View style={styles.copy}>
           <View style={styles.kickerRow}>
             <Text style={[styles.kicker, { color: theme.colors.primary }]} variant="labelSmall">
-              {activeTeamName ? `${activeTeamName} · active team` : hasTeamWorkspace ? 'No active team' : 'Personal scans'}
+              {activeTeamName ? `${activeTeamName} · company team` : hasTeamWorkspace ? 'No team set' : 'Personal scans'}
             </Text>
             <View style={styles.badgeRow}>
               <View style={[styles.badge, { backgroundColor: theme.colors.surfaceContainerHighest }]}>
@@ -107,7 +109,7 @@ export function ScanHeroCard({
           </Text>
           <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
             {activeTeamName
-              ? 'Take a photo, check the details, and send the card to the right team member.'
+              ? 'Take a photo, check the details, and save the card to the team inbox.'
               : 'Take a photo, check the details, and save the card to your account.'}
           </Text>
           {activeTeamName ? (
@@ -116,7 +118,7 @@ export function ScanHeroCard({
                 New cards stay in the team inbox first.
               </Text>
               <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }} variant="bodySmall">
-                Team leads can review and assign them when ready.
+                Team Leaders can review and assign them when ready.
               </Text>
             </View>
           ) : null}
@@ -138,7 +140,7 @@ export function ScanHeroCard({
               Scan now
             </MotionButton>
             <MotionButton icon="history" mode="outlined" onPress={onOpenHistory} testID="history-button">
-              View history
+              {`View ${historyLabel.toLowerCase()}`}
             </MotionButton>
           </View>
         </View>

@@ -36,7 +36,7 @@ function TeamReassignSheetImpl(
               Reassign card
             </Text>
             <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
-              Move this card to another team member.
+              Move this assigned card to another Worker.
             </Text>
           </View>
           {assignmentItem ? (
@@ -46,7 +46,7 @@ function TeamReassignSheetImpl(
               </Chip>
               {assignmentItem.assignedToUserId ? (
                 <Chip compact mode="outlined" style={styles.assignmentChip}>
-                  Current owner
+                  Current Worker
                 </Chip>
               ) : null}
             </View>
@@ -55,10 +55,10 @@ function TeamReassignSheetImpl(
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           {assignmentItem ? (
             <View style={styles.section}>
-              <Text variant="titleMedium">Choose a member</Text>
+              <Text variant="titleMedium">Choose a Worker</Text>
               {workers.length === 0 ? (
                 <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 8 }} variant="bodyMedium">
-                  No team members are available for reassignment.
+                  No Workers are available for reassignment.
                 </Text>
               ) : (
                 <View style={styles.list}>
@@ -73,8 +73,8 @@ function TeamReassignSheetImpl(
                         <View style={styles.rowCopy}>
                           <Text variant="titleSmall">{member.email}</Text>
                           <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
-                            {member.isLeader ? 'Team lead' : 'Team member'}
-                            {isCurrentAssignee ? ' · Current owner' : ''}
+                            Worker
+                            {isCurrentAssignee ? ' · Current assignee' : ''}
                           </Text>
                         </View>
                         <Button

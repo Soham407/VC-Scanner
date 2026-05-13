@@ -146,7 +146,7 @@ function getAssignmentLabel(item: TeamInboxItem): string {
 }
 
 function getMemberLabel(memberLabel: string | undefined | null): string {
-  return memberLabel ?? 'Team member';
+  return memberLabel ?? 'Worker';
 }
 
 function scannerHistoryToInboxItem(item: ScannerHistoryItem, userId: string): TeamInboxItem {
@@ -435,6 +435,7 @@ function DashboardScreen({
   failedCount,
   onOpenCamera,
   onOpenHistory,
+  historyLabel,
   status
 }: {
   activeTeamName: string | null;
@@ -442,6 +443,7 @@ function DashboardScreen({
   failedCount: number;
   history: ScannerHistoryItem[];
   inFlightCount: number;
+  historyLabel: string;
   onOpenCamera: () => void;
   onOpenHistory: () => void;
   status: OcrStatus;
@@ -454,6 +456,7 @@ function DashboardScreen({
         <ScanHeroCard
           activeTeamName={activeTeamName}
           hasTeamWorkspace={hasTeamWorkspace}
+          historyLabel={historyLabel}
           onOpenCamera={onOpenCamera}
           onOpenHistory={onOpenHistory}
           failedCount={failedCount}
@@ -563,10 +566,10 @@ function HistoryScreen({
   });
   const title = mode === 'leader-inbox' ? 'Team Inbox' : isPersonalHistory ? 'History' : 'Assignments';
   const subtitle = mode === 'leader-inbox'
-    ? 'Review new cards, choose who should handle them, and keep the team moving.'
+    ? 'Review team scans, select cards, and assign them to Workers.'
     : isPersonalHistory
       ? 'Every card saved by your account appears here.'
-      : 'Cards assigned to you appear here.';
+      : 'Cards assigned to you for follow-up appear here.';
   const availableFilters = mode === 'leader-inbox'
     ? [
         { count: items.length, label: 'All', value: 'all' as const },
@@ -590,7 +593,7 @@ function HistoryScreen({
         >
           <View style={styles.historyHeroCopy}>
             <Text style={styles.screenKicker} variant="labelSmall">
-              {mode === 'leader-inbox' ? 'Team lead' : isPersonalHistory ? 'My scans' : 'My work'}
+              {mode === 'leader-inbox' ? 'Team Leader' : isPersonalHistory ? 'My scans' : 'My assignments'}
             </Text>
             <Text variant="headlineMedium">{title}</Text>
             <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }} variant="bodyMedium">
@@ -605,7 +608,7 @@ function HistoryScreen({
           <View style={styles.historyHeroActions}>
             <View style={[styles.historyHeroBadge, { backgroundColor: theme.colors.surfaceContainerHighest }]}>
               <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelSmall">
-                {mode === 'leader-inbox' ? 'Lead view' : isPersonalHistory ? 'Personal' : 'My view'}
+                {mode === 'leader-inbox' ? 'Leader view' : isPersonalHistory ? 'Personal' : 'Worker view'}
               </Text>
             </View>
             <Button icon="camera" mode="contained" onPress={onOpenCamera} testID="history-empty-scan-button">
@@ -709,7 +712,7 @@ function HistoryScreen({
                     ? 'Team scans will appear here as your team captures cards.'
                     : isPersonalHistory
                       ? 'Your saved scans will appear here.'
-                      : 'Cards will appear here after your team lead assigns them.'
+                      : 'Cards will appear here after a Team Leader assigns them.'
                   : 'Try another filter to see more cards.'}
               </Text>
               <Button icon="camera" mode="contained" onPress={onOpenCamera}>
@@ -873,13 +876,13 @@ function AssignmentDetailScreen({
           </Text>
           <Text variant="headlineSmall">Mark as needs review?</Text>
           <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
-            Use this when details are missing or a team lead should check the card.
+            Use this when details are missing or a Team Leader should check the card.
           </Text>
         </Surface>
         <Surface elevation={1} style={[styles.detailPanel, { backgroundColor: theme.colors.surfaceContainer }]}>
           <DetailField label="Assignment" value={getTeamInboxItemTitle(item)} />
           <DetailField label="Assigned to" value={getMemberLabel(memberLabel)} />
-          <DetailField label="Team" value="Active team" />
+          <DetailField label="Team" value="Company team" />
         </Surface>
         <View style={styles.detailActions}>
           <Button
@@ -995,8 +998,8 @@ function AssignmentDetailScreen({
       {!isPersonalHistory ? (
         <Surface elevation={1} style={[styles.detailPanel, { backgroundColor: theme.colors.surfaceContainer }]}>
           <DetailField label="Status" value={getAssignmentLabel(item)} />
-          <DetailField label="Captured by" value="Team member" />
-          <DetailField label="Visible to" value={item.assignmentState ? getMemberLabel(memberLabel) : 'Team leads'} />
+          <DetailField label="Captured by" value="Team user" />
+          <DetailField label="Visible to" value={item.assignmentState ? getMemberLabel(memberLabel) : 'Team Leaders'} />
         </Surface>
       ) : null}
 
@@ -1181,52 +1184,23 @@ function CardCaptureModeScreen({
   );
 }
 
-function TeamCaptureConfirmScreen({
-  activeTeamName,
-  onConfirm,
-  onSwitchTeam
-}: {
-  activeTeamName: string;
-  onConfirm: () => void;
-  onSwitchTeam: () => void;
-}) {
-  const theme = useAppTheme();
-
-  return (
-    <ScreenShell>
-      <Surface elevation={2} style={[styles.detailHero, { backgroundColor: theme.colors.surfaceContainerHigh }]}>
-        <Text style={styles.screenKicker} variant="labelSmall">
-          Confirm team
-        </Text>
-        <Text variant="headlineSmall">Save this card to {activeTeamName}?</Text>
-        <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
-          This helps prevent cards from going to the wrong team.
-        </Text>
-      </Surface>
-      <View style={styles.detailActions}>
-        <Button mode="contained" onPress={onConfirm} testID="confirm-team-capture-button">
-          Confirm and scan
-        </Button>
-        <Button mode="outlined" onPress={onSwitchTeam}>
-          Switch team
-        </Button>
-      </View>
-    </ScreenShell>
-  );
-}
-
 function BatchApprovalConfirmScreen({
+  allocations,
   scanCount,
   workerCount,
+  workers,
   onApprove,
   onBack
 }: {
+  allocations: Array<{ count: number; userId: string }>;
   scanCount: number;
   workerCount: number;
+  workers: Array<{ email: string; userId: string }>;
   onApprove: () => void;
   onBack: () => void;
 }) {
   const theme = useAppTheme();
+  const assignedCount = allocations.reduce((total, allocation) => total + allocation.count, 0);
 
   return (
     <ScreenShell>
@@ -1236,18 +1210,46 @@ function BatchApprovalConfirmScreen({
         </Text>
         <Text variant="headlineSmall">Assign {scanCount} card{scanCount === 1 ? '' : 's'}?</Text>
         <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
-          Each team member will only see the cards assigned to them. Team leads can still see the full list.
+          Cards are shuffled before approval, then split by the worker counts you set.
         </Text>
       </Surface>
       <MetricRail
         items={[
           { label: 'Scans', value: scanCount },
           { label: 'Members', tone: 'tertiary', value: workerCount },
-          { label: 'Ready', tone: 'secondary', value: scanCount > 0 ? 1 : 0 }
+          { label: 'Ready', tone: 'secondary', value: assignedCount === scanCount ? 1 : 0 }
         ]}
       />
+      <Surface elevation={1} style={[styles.allocationPreviewPanel, { backgroundColor: theme.colors.surfaceContainer }]}>
+        <View style={styles.teamSectionHeader}>
+          <Text variant="titleMedium">Worker split</Text>
+          <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
+            Total assigned: {assignedCount}/{scanCount}
+          </Text>
+        </View>
+        <View style={styles.memberList}>
+          {workers.map((worker) => {
+            const allocation = allocations.find((entry) => entry.userId === worker.userId);
+
+            return (
+              <Surface
+                key={worker.userId}
+                elevation={0}
+                style={[styles.memberRow, { backgroundColor: theme.colors.surfaceContainerHighest }]}
+              >
+                <View style={styles.memberRowCopy}>
+                  <Text variant="titleSmall">{worker.email}</Text>
+                  <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
+                    {allocation?.count ?? 0} cards
+                  </Text>
+                </View>
+              </Surface>
+            );
+          })}
+        </View>
+      </Surface>
       <View style={styles.detailActions}>
-        <Button mode="contained" onPress={onApprove} testID="confirm-approve-assignment-batch-button">
+        <Button disabled={assignedCount !== scanCount} mode="contained" onPress={onApprove} testID="confirm-approve-assignment-batch-button">
           Assign cards
         </Button>
         <Button mode="outlined" onPress={onBack}>
@@ -1696,31 +1698,23 @@ function HistoryFilterPill({
 }
 
 function TeamScreen({
-  activeTeamId,
-  activeTeamName,
-  teams,
-  isTeamMembersLoading,
-  isTeamsLoading,
   isInviteCreationLoading,
+  isTeamMembersLoading,
   currentUserId,
   members,
+  team,
   teamPendingInvites,
   onCreateInvite,
-  onPromoteMember,
-  onSelectTeam
+  onPromoteMember
 }: {
-  activeTeamId: string | null;
-  activeTeamName: string | null;
-  teams: AccessibleTeam[];
-  isTeamMembersLoading: boolean;
-  isTeamsLoading: boolean;
-  isInviteCreationLoading: boolean;
   currentUserId: string;
+  isInviteCreationLoading: boolean;
+  isTeamMembersLoading: boolean;
   members: TeamMember[];
+  team: AccessibleTeam | null;
   teamPendingInvites: TeamWorkspaceState['teamPendingInvites'];
   onCreateInvite: (invitedEmail: string) => Promise<void>;
   onPromoteMember: (userId: string) => Promise<void>;
-  onSelectTeam: (teamId: string) => void;
 }) {
   const theme = useAppTheme();
   const [inviteEmail, setInviteEmail] = useState('');
@@ -1747,9 +1741,9 @@ function TeamScreen({
     })();
   };
 
-  const hasActiveTeam = Boolean(activeTeamId);
-  const canSwitchTeams = teams.length > 1 || (!activeTeamId && teams.length > 0);
+  const hasTeam = Boolean(team);
   const leaderCount = members.filter((member) => member.isLeader).length;
+  const workerCount = members.length - leaderCount;
 
   return (
     <ScreenShell>
@@ -1765,49 +1759,47 @@ function TeamScreen({
             <Text style={styles.screenKicker} variant="labelSmall">
               Team
             </Text>
-            <Text variant="headlineMedium">Team</Text>
+            <Text variant="headlineMedium">{team?.name ?? 'Team'}</Text>
             <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
-              Manage teams, members, team leads, and pending invites.
+              Manage members, invites, and worker assignments for this company team.
             </Text>
           </View>
           <View style={styles.profileStatusWrap}>
-            <StatusChip status={hasActiveTeam ? 'parsed' : 'idle'} />
+            <StatusChip status={hasTeam ? 'parsed' : 'idle'} />
           </View>
         </Surface>
       </Animated.View>
 
-      {hasActiveTeam ? (
+      {hasTeam ? (
         <Animated.View entering={FadeInDown.delay(110).duration(motion.duration.medium1).easing(motion.easing.emphasized)}>
           <View style={styles.teamStatsRow}>
-            <AnimatedStatCard delay={0} label="Teams" value={teams.length} />
-            <AnimatedStatCard delay={60} label="Members" value={members.length} />
-            <AnimatedStatCard delay={120} label="Pending" value={teamPendingInvites.length} />
+            <AnimatedStatCard delay={0} label="Members" value={members.length} />
+            <AnimatedStatCard delay={60} label="Workers" value={workerCount} />
+            <AnimatedStatCard delay={120} label="Leaders" value={leaderCount} />
           </View>
         </Animated.View>
       ) : null}
 
-      {hasActiveTeam ? (
+      {hasTeam ? (
         <>
-          <Animated.View entering={FadeInDown.delay(hasActiveTeam ? 200 : 170).duration(motion.duration.medium1).easing(motion.easing.emphasized)}>
+          <Animated.View entering={FadeInDown.delay(200).duration(motion.duration.medium1).easing(motion.easing.emphasized)}>
             <Surface
               elevation={1}
               style={[styles.teamSummaryPanel, { backgroundColor: theme.colors.surfaceContainer }]}
             >
               <View style={styles.teamSectionHeader}>
-                <Text variant="titleMedium">Active team</Text>
+                <Text variant="titleMedium">Company team</Text>
                 <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
-                  {activeTeamName
-                    ? `Active team: ${activeTeamName}`
-                    : 'This is the team that will receive the next scan.'}
+                  {team ? `Created by ${team.createdBy === currentUserId ? 'you' : 'another leader'}` : 'No team loaded.'}
                 </Text>
               </View>
-              <Button compact mode="contained-tonal" disabled={!activeTeamId}>
-                {activeTeamId ? 'Active' : 'No team'}
+              <Button compact mode="contained-tonal" disabled={!team}>
+                {team ? 'Current team' : 'No team'}
               </Button>
             </Surface>
           </Animated.View>
 
-          <Animated.View entering={FadeInDown.delay(hasActiveTeam ? 230 : 200).duration(motion.duration.medium1).easing(motion.easing.emphasized)}>
+          <Animated.View entering={FadeInDown.delay(230).duration(motion.duration.medium1).easing(motion.easing.emphasized)}>
             <Surface
               elevation={1}
               style={[styles.managementPanel, { backgroundColor: theme.colors.surfaceContainer }]}
@@ -1833,7 +1825,7 @@ function TeamScreen({
                 value={inviteEmail}
               />
               <Button
-                disabled={isInviteCreationLoading || !activeTeamId || !inviteEmail.trim()}
+                disabled={isInviteCreationLoading || !team || !inviteEmail.trim()}
                 loading={isInviteCreationLoading}
                 mode="contained"
                 onPress={handleCreateInvite}
@@ -1863,7 +1855,7 @@ function TeamScreen({
                       <View style={styles.memberRowCopy}>
                         <Text variant="titleSmall">{invite.invitedEmail}</Text>
                         <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
-                          Team member invite
+                          Pending team invite
                         </Text>
                       </View>
                       <Button compact disabled mode="outlined">
@@ -1876,7 +1868,7 @@ function TeamScreen({
             </Surface>
           </Animated.View>
 
-          <Animated.View entering={FadeInDown.delay(hasActiveTeam ? 260 : 230).duration(motion.duration.medium2).easing(motion.easing.emphasized)}>
+          <Animated.View entering={FadeInDown.delay(260).duration(motion.duration.medium2).easing(motion.easing.emphasized)}>
             <Surface
               elevation={1}
               style={[styles.managementPanel, { backgroundColor: theme.colors.surfaceContainer }]}
@@ -1884,7 +1876,7 @@ function TeamScreen({
               <View style={styles.teamSectionHeader}>
                 <Text variant="titleMedium">Members</Text>
                 <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
-                  Promote members to team leads and track who has access.
+                  Promote members to Team Leaders and track who has access.
                 </Text>
               </View>
               {isTeamMembersLoading ? (
@@ -1907,7 +1899,7 @@ function TeamScreen({
                           <Text variant="titleSmall">{member.email}</Text>
                           <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
                             {isSelf ? 'You' : 'Member'}
-                            {member.isLeader ? ' · Team lead' : ''}
+                            {member.isLeader ? ' · Team Leader' : ' · Worker'}
                           </Text>
                         </View>
                         {member.isLeader ? (
@@ -1946,76 +1938,24 @@ function TeamScreen({
             </Surface>
           </Animated.View>
 
-        </>
-      ) : null}
-
-      {canSwitchTeams ? (
-        <Animated.View entering={FadeInDown.delay(hasActiveTeam ? 290 : 260).duration(motion.duration.medium1).easing(motion.easing.emphasized)}>
-          <Surface
-            elevation={1}
-            style={[styles.managementPanel, { backgroundColor: theme.colors.surfaceContainer }]}
-          >
-            <View style={styles.teamSectionHeader}>
-              <Text variant="titleMedium">Switch team</Text>
-              <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
-                Tap a team to make it active.
+          <Animated.View entering={FadeInDown.delay(290).duration(motion.duration.medium1).easing(motion.easing.emphasized)}>
+            <Surface
+              elevation={1}
+              style={[styles.managementPanel, { backgroundColor: theme.colors.surfaceContainer }]}
+            >
+              <View style={styles.teamSectionHeader}>
+                <Text variant="titleMedium">Team details</Text>
+                <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
+                  {team ? `Team ID: ${team.id}` : 'No team loaded.'}
+                </Text>
+              </View>
+              <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
+                All scans enter the team inbox first. Team Leaders can review scans, but only workers receive assignments.
               </Text>
-            </View>
-            <View style={styles.teamList}>
-              {teams.map((team) => {
-                const active = team.id === activeTeamId;
+            </Surface>
+          </Animated.View>
 
-                return (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: active }}
-                    key={team.id}
-                    onPress={() => onSelectTeam(team.id)}
-                  >
-                    <Surface
-                      elevation={active ? 1 : 0}
-                      style={[
-                        styles.teamRow,
-                        {
-                          backgroundColor: active
-                            ? theme.colors.secondaryContainer
-                            : theme.colors.surfaceContainerHighest
-                        }
-                      ]}
-                    >
-                      <View style={styles.teamRowCopy}>
-                        <Text
-                          style={{
-                            color: active ? theme.colors.onSecondaryContainer : theme.colors.onSurface
-                          }}
-                          variant="titleSmall"
-                        >
-                          {team.name}
-                        </Text>
-                        <Text
-                          style={{
-                            color: active ? theme.colors.onSecondaryContainer : theme.colors.onSurfaceVariant
-                          }}
-                          variant="bodySmall"
-                        >
-                          {team.createdBy === currentUserId ? 'Created by you' : 'Accessible team'}
-                        </Text>
-                      </View>
-                      <Button
-                        compact
-                        disabled={active}
-                        mode={active ? 'contained' : 'text'}
-                        onPress={() => onSelectTeam(team.id)}
-                      >
-                        {active ? 'Active' : 'Make active'}
-                      </Button>
-                    </Surface>
-                  </Pressable>
-                );
-              })}
-            </View>
-          </Surface>
-        </Animated.View>
+        </>
       ) : null}
     </ScreenShell>
   );
@@ -2097,44 +2037,59 @@ function ProfileScreen({
       </Animated.View>
 
       <Animated.View entering={FadeInDown.delay(160).duration(motion.duration.medium2).easing(motion.easing.emphasized)}>
-        <Surface
-          elevation={1}
-          style={[styles.managementPanel, { backgroundColor: theme.colors.surfaceContainer }]}
-        >
-          <View style={styles.teamSectionHeader}>
-            <Text variant="titleMedium">{hasTeamWorkspace ? 'Create another team' : 'Create your first team'}</Text>
-            <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
-              {hasTeamWorkspace
-                ? 'Add a separate workspace when you need team capture and assignment tools.'
-                : 'Create a team only when you want shared scanning, invites, and assignments.'}
-            </Text>
-          </View>
-          <TextInput
-            label="Team name"
-            mode="outlined"
-            onChangeText={(value) => {
-              setTeamName(value);
-              setTeamError(null);
-            }}
-            placeholder="North Hall"
-            testID="profile-team-name-input"
-            value={teamName}
-          />
-          <Button
-            disabled={isTeamCreationLoading}
-            loading={isTeamCreationLoading}
-            mode="contained"
-            onPress={handleCreateTeam}
-            testID="profile-create-team-button"
+        {hasTeamWorkspace ? (
+          <Surface
+            elevation={1}
+            style={[styles.managementPanel, { backgroundColor: theme.colors.surfaceContainer }]}
           >
-            Create team
-          </Button>
-          {teamError ? (
-            <Text style={{ color: theme.colors.error }} variant="bodySmall">
-              {teamError}
+            <View style={styles.teamSectionHeader}>
+              <Text variant="titleMedium">Team setup</Text>
+              <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
+                This account already belongs to a company team. Create a team only for new company accounts.
+              </Text>
+            </View>
+            <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
+              Team creation is disabled once a membership exists.
             </Text>
-          ) : null}
-        </Surface>
+          </Surface>
+        ) : (
+          <Surface
+            elevation={1}
+            style={[styles.managementPanel, { backgroundColor: theme.colors.surfaceContainer }]}
+          >
+            <View style={styles.teamSectionHeader}>
+              <Text variant="titleMedium">Create your first team</Text>
+              <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
+                Create a team only when you want shared scanning, invites, and assignments.
+              </Text>
+            </View>
+            <TextInput
+              label="Team name"
+              mode="outlined"
+              onChangeText={(value) => {
+                setTeamName(value);
+                setTeamError(null);
+              }}
+              placeholder="North Hall"
+              testID="profile-team-name-input"
+              value={teamName}
+            />
+            <Button
+              disabled={isTeamCreationLoading}
+              loading={isTeamCreationLoading}
+              mode="contained"
+              onPress={handleCreateTeam}
+              testID="profile-create-team-button"
+            >
+              Create team
+            </Button>
+            {teamError ? (
+              <Text style={{ color: theme.colors.error }} variant="bodySmall">
+                {teamError}
+              </Text>
+            ) : null}
+          </Surface>
+        )}
       </Animated.View>
 
       <Animated.View entering={FadeInDown.delay(210).duration(motion.duration.medium2).easing(motion.easing.emphasized)}>
@@ -2376,7 +2331,6 @@ function ScannerApp({
   const [activeTab, setActiveTab] = useState<AppTab>('dashboard');
   const [previousTabIndex, setPreviousTabIndex] = useState(0);
   const [isCameraOpen, setIsCameraOpen] = useState(false);
-  const [isTeamCaptureConfirmOpen, setIsTeamCaptureConfirmOpen] = useState(false);
   const [isBatchApprovalConfirmOpen, setIsBatchApprovalConfirmOpen] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
   const [previewUri, setPreviewUri] = useState<string | null>(null);
@@ -2387,18 +2341,14 @@ function ScannerApp({
   const [captureMode, setCaptureMode] = useState<CardCaptureMode | null>(null);
   const [isCaptureModePickerOpen, setIsCaptureModePickerOpen] = useState(false);
   const [pendingFrontSide, setPendingFrontSide] = useState<(CapturedCardSide & { leadId: string }) | null>(null);
-  const [pendingCaptureConfirmationTeamId, setPendingCaptureConfirmationTeamId] = useState<string | null>(null);
   const {
-    activeTeamId,
-    activeTeamName,
-    teams,
     addBatchItem,
     createTeam,
     approveBatch,
     createBatch,
     createInvite,
     hasTeamWorkspace,
-    historyActiveTeamId,
+    historyTeamId,
     historyTeamName,
     historyItems,
     historyMode,
@@ -2412,14 +2362,16 @@ function ScannerApp({
     pendingBatchId,
     pendingBatchItems,
     pendingBatchScanCount,
+    pendingBatchAllocations,
+    updatePendingBatchAllocation,
     teamPendingInvites,
     members,
+    team,
     promoteMember,
     reassignAssignment,
     removeBatchItem,
     updateAssignmentState,
-    updateLeadDetails,
-    selectTeam
+    updateLeadDetails
   } = workspace;
   const captureLockRef = useRef(false);
   const captureGenerationRef = useRef(0);
@@ -2441,12 +2393,22 @@ function ScannerApp({
 
   const inFlightCount = queue.filter((item) => item.status !== 'failed').length;
   const failedCount = queue.filter((item) => item.status === 'failed').length;
-  const visibleRoutes = hasTeamWorkspace ? routes : routes.filter((route) => route.key !== 'team');
+  const captureTeamId = team?.id ?? null;
+  const displayActiveTeamName = team?.name ?? null;
+  const isPersonalHistory = !historyTeamId;
+  const historyRoute = isPersonalHistory
+    ? { focusedIcon: 'clock', title: 'History', unfocusedIcon: 'clock-outline' }
+    : historyMode === 'leader-inbox'
+      ? { focusedIcon: 'inbox', title: 'Inbox', unfocusedIcon: 'inbox-outline' }
+      : { focusedIcon: 'clipboard-account', title: 'Assignments', unfocusedIcon: 'clipboard-account-outline' };
+  const modeAwareRoutes = routes.map((route) =>
+    route.key === 'history'
+      ? { ...route, ...historyRoute }
+      : route
+  );
+  const visibleRoutes = hasTeamWorkspace ? modeAwareRoutes : modeAwareRoutes.filter((route) => route.key !== 'team');
   const activeIndex = visibleRoutes.findIndex((route) => route.key === activeTab);
   const pageDirection = activeIndex >= previousTabIndex ? 1 : -1;
-  const captureTeamId = activeTeamId && hasTeamWorkspace ? activeTeamId : null;
-  const displayActiveTeamName = captureTeamId ? activeTeamName : null;
-  const isPersonalHistory = !historyActiveTeamId;
   const dashboardStatus: OcrStatus = failedCount > 0
     ? 'failed'
     : inFlightCount > 0
@@ -2726,17 +2688,6 @@ function ScannerApp({
   }, [activeIndex]);
 
   const openCamera = useCallback(() => {
-    if (captureTeamId && pendingCaptureConfirmationTeamId === captureTeamId && activeTeamName) {
-      setIsTeamCaptureConfirmOpen(true);
-      return;
-    }
-
-    setIsCaptureModePickerOpen(true);
-  }, [activeTeamName, captureTeamId, pendingCaptureConfirmationTeamId]);
-
-  const confirmTeamAndOpenCamera = useCallback(() => {
-    setPendingCaptureConfirmationTeamId(null);
-    setIsTeamCaptureConfirmOpen(false);
     setIsCaptureModePickerOpen(true);
   }, []);
 
@@ -2776,11 +2727,13 @@ function ScannerApp({
   const pendingBatchAvailableCards = visibleHistoryItems.filter(
     (item) => !pendingBatchItemSet.has(item.id) && !item.assignmentState
   );
-
-  const handleSelectTeam = useCallback((teamId: string) => {
-    selectTeam(teamId);
-    setPendingCaptureConfirmationTeamId(teamId);
-  }, [selectTeam]);
+  const workerMembers = members.filter((member) => !member.isLeader);
+  const pendingBatchAssignedCount = pendingBatchAllocations.reduce((total, allocation) => total + allocation.count, 0);
+  const canApprovePendingBatch =
+    Boolean(pendingBatchId)
+    && pendingBatchCards.length > 0
+    && workerMembers.length > 0
+    && pendingBatchAssignedCount === pendingBatchCards.length;
 
   const handleTabChange = useCallback((nextTab: AppTab) => {
     if (nextTab === activeTab) {
@@ -2799,11 +2752,18 @@ function ScannerApp({
           if (isBatchApprovalConfirmOpen) {
             return (
               <BatchApprovalConfirmScreen
-                scanCount={pendingBatchScanCount}
-                workerCount={members.filter((member) => !member.isLeader).length}
+                allocations={pendingBatchAllocations}
+                scanCount={pendingBatchCards.length}
+                workerCount={workerMembers.length}
+                workers={workerMembers}
                 onApprove={() => {
-                  setIsBatchApprovalConfirmOpen(false);
-                  approveBatch();
+                  void (async () => {
+                    await approveBatch(pendingBatchAllocations);
+                    setIsBatchApprovalConfirmOpen(false);
+                  })().catch((error) => {
+                    console.warn('Batch approval failed', error);
+                    Alert.alert('Batch approval failed', 'Please try again.');
+                  });
                 }}
                 onBack={() => setIsBatchApprovalConfirmOpen(false)}
               />
@@ -2831,8 +2791,8 @@ function ScannerApp({
 
           return (
             <HistoryScreen
-              canApproveBatch={Boolean(pendingBatchId && pendingBatchScanCount > 0)}
-              canCreateBatch={Boolean(historyActiveTeamId && !pendingBatchId && pendingBatchAvailableCards.length > 0)}
+              canApproveBatch={canApprovePendingBatch}
+              canCreateBatch={Boolean(historyTeamId && !pendingBatchId && pendingBatchAvailableCards.length > 0)}
               canEditBatch={Boolean(pendingBatchId)}
               members={members}
               teamName={historyTeamName}
@@ -2865,18 +2825,14 @@ function ScannerApp({
 
           return (
             <TeamScreen
-              activeTeamId={activeTeamId}
-              activeTeamName={activeTeamName}
-              teams={teams}
-              isTeamMembersLoading={isTeamMembersLoading}
               currentUserId={session.user.id}
               isInviteCreationLoading={isInviteCreationLoading}
+              isTeamMembersLoading={isTeamMembersLoading}
               members={members}
+              team={team}
               teamPendingInvites={teamPendingInvites}
               onCreateInvite={createInvite}
-              isTeamsLoading={isTeamsLoading}
               onPromoteMember={promoteMember}
-              onSelectTeam={handleSelectTeam}
             />
           );
         case 'profile':
@@ -2897,6 +2853,7 @@ function ScannerApp({
               failedCount={failedCount}
               hasTeamWorkspace={hasTeamWorkspace}
               history={history}
+              historyLabel={historyRoute.title}
               inFlightCount={inFlightCount}
               onOpenCamera={openCamera}
               onOpenHistory={openHistory}
@@ -2909,10 +2866,8 @@ function ScannerApp({
         dashboardStatus,
         failedCount,
         history,
-        activeTeamId,
         hasTeamWorkspace,
-        teams,
-        historyActiveTeamId,
+        historyTeamId,
         historyTeamName,
         historyItems,
         historyMode,
@@ -2928,6 +2883,7 @@ function ScannerApp({
         pendingBatchId,
         pendingBatchItems,
         pendingBatchScanCount,
+        pendingBatchAllocations,
         pendingBatchAvailableCards,
         isBatchApprovalConfirmOpen,
         selectedHistoryItem,
@@ -2945,13 +2901,14 @@ function ScannerApp({
         removeBatchItem,
         updateAssignmentState,
         updateLeadDetails,
-        handleSelectTeam,
-        activeTeamName,
         displayActiveTeamName,
         isPersonalHistory,
         isTeamCreationLoading,
         visibleHistoryItems,
-        session.user.email
+        session.user.email,
+        team,
+        workerMembers,
+        canApprovePendingBatch
       ]
   );
 
@@ -2970,16 +2927,6 @@ function ScannerApp({
           activeTeamName={displayActiveTeamName}
           onCancel={cancelCaptureMode}
           onSelect={startCaptureMode}
-        />
-      ) : isTeamCaptureConfirmOpen && displayActiveTeamName ? (
-        <TeamCaptureConfirmScreen
-          activeTeamName={displayActiveTeamName}
-          onConfirm={confirmTeamAndOpenCamera}
-          onSwitchTeam={() => {
-            setIsTeamCaptureConfirmOpen(false);
-            setPreviousTabIndex(activeIndex >= 0 ? activeIndex : 0);
-            setActiveTab(hasTeamWorkspace ? 'team' : 'profile');
-          }}
         />
       ) : isCameraOpen ? (
         <CameraScreen
@@ -3037,9 +2984,11 @@ function ScannerApp({
       <TeamAssignmentBatchSheet
         ref={batchSheetRef}
         availableItems={pendingBatchAvailableCards}
+        allocations={pendingBatchAllocations}
         batchItems={pendingBatchCards}
         batchScanCount={pendingBatchScanCount}
         isLoading={isBatchActionLoading}
+        workers={workerMembers}
         onAddItem={(scannedLeadId) => {
           void addBatchItem(scannedLeadId).catch((error) => {
             console.warn('Batch item add failed', error);
@@ -3049,6 +2998,9 @@ function ScannerApp({
           void removeBatchItem(scannedLeadId).catch((error) => {
             console.warn('Batch item remove failed', error);
           });
+        }}
+        onChangeAllocation={(userId, count) => {
+          updatePendingBatchAllocation(userId, count);
         }}
       />
       <TeamReassignSheet
@@ -3731,6 +3683,11 @@ const styles = StyleSheet.create({
   managementPanel: {
     borderRadius: 8,
     gap: 10,
+    padding: 14
+  },
+  allocationPreviewPanel: {
+    borderRadius: 8,
+    gap: 12,
     padding: 14
   },
   memberList: {

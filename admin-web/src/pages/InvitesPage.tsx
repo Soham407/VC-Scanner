@@ -70,7 +70,7 @@ export function InvitesPage({ teamId }: { teamId: string }) {
       <div className="card stack">
         {loading ? <div className="loading-card">Loading invitations...</div> : null}
         {!loading && invites.length === 0 ? (
-          <EmptyState title="No pending invitations">Invite workers who should receive and complete assigned card follow-ups.</EmptyState>
+          <EmptyState title="No pending invitations">Invite Workers who should scan cards or receive assigned cards.</EmptyState>
         ) : null}
         {invites.map((invite) => (
           <div className="mini-row" key={invite.id}>

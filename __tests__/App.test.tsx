@@ -19,9 +19,7 @@ const mockRecordHistory = jest.fn();
 const mockRetry = jest.fn();
 const mockDrainOnce = jest.fn();
 const mockGarbageCollect = jest.fn();
-const mockGetActiveTeamId = jest.fn();
-const mockSetActiveTeamId = jest.fn();
-const mockLoadAccessibleTeams = jest.fn();
+const mockLoadCurrentTeam = jest.fn();
 const mockCreateTeam = jest.fn();
 const mockCreateTeamInvite = jest.fn();
 const mockListPendingTeamInvitesForEmail = jest.fn();
@@ -161,14 +159,9 @@ jest.mock('../src/components/AuthScreen', () => ({
   }
 }));
 
-jest.mock('../src/lib/teamContext', () => ({
-  getActiveTeamId: (...args: unknown[]) => mockGetActiveTeamId(...args),
-  setActiveTeamId: (...args: unknown[]) => mockSetActiveTeamId(...args)
-}));
-
 jest.mock('../src/lib/teams', () => ({
   createTeam: (...args: unknown[]) => mockCreateTeam(...args),
-  loadAccessibleTeams: (...args: unknown[]) => mockLoadAccessibleTeams(...args)
+  loadCurrentTeam: (...args: unknown[]) => mockLoadCurrentTeam(...args)
 }));
 
 jest.mock('../src/lib/teamInbox', () => ({
@@ -186,6 +179,7 @@ jest.mock('../src/lib/teamInvites', () => ({
   respondToTeamInvite: (...args: unknown[]) => mockRespondToTeamInvite(...args)
 }));
 jest.mock('../src/lib/teamAssignments', () => ({
+  ...jest.requireActual('../src/lib/teamAssignments'),
   addTeamAssignmentBatchItem: (...args: unknown[]) => mockAddTeamAssignmentBatchItem(...args),
   createTeamAssignmentBatch: (...args: unknown[]) => mockCreateTeamAssignmentBatch(...args),
   approveTeamAssignmentBatch: (...args: unknown[]) => mockApproveTeamAssignmentBatch(...args),
@@ -330,9 +324,7 @@ describe('App permissions flow', () => {
     jest.spyOn(Linking, 'getInitialURL').mockResolvedValue(null);
     mockGarbageCollect.mockResolvedValue(undefined);
     mockDrainOnce.mockResolvedValue(undefined);
-    mockGetActiveTeamId.mockResolvedValue(null);
-    mockSetActiveTeamId.mockResolvedValue(undefined);
-    mockLoadAccessibleTeams.mockResolvedValue([]);
+    mockLoadCurrentTeam.mockResolvedValue(null);
     mockCreateTeam.mockResolvedValue({
       createdAt: '2026-05-04T10:00:00Z',
       createdBy: 'user-1',
@@ -400,7 +392,7 @@ describe('App permissions flow', () => {
       parsed: params.parsed
     }));
     mockLoadTeamInboxReview.mockResolvedValue({
-      activeTeamId: null,
+      teamId: null,
       teamName: null,
       items: [],
       mode: 'worker-history'
@@ -466,6 +458,14 @@ describe('App permissions flow', () => {
 
   it('shows a blocking pending-invite gate for signed-in users and resolves on accept', async () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+    mockLoadCurrentTeam
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        createdAt: '2026-05-02T11:30:00.000Z',
+        createdBy: 'leader-1',
+        id: 'team-1',
+        name: 'Main Team'
+      });
     mockListPendingTeamInvitesForEmail.mockResolvedValue([
       {
         id: 'invite-1',
@@ -488,7 +488,7 @@ describe('App permissions flow', () => {
     });
 
     expect(mockRespondToTeamInvite).toHaveBeenCalledWith('invite-1', 'accept');
-    expect(mockSetActiveTeamId).toHaveBeenCalledWith('team-1');
+    expect(mockLoadCurrentTeam).toHaveBeenCalled();
     expect(screen.queryByText('Team invite pending')).toBeNull();
     expect(screen.getAllByText('Dashboard').length).toBeGreaterThan(0);
   });
@@ -558,7 +558,7 @@ describe('App permissions flow', () => {
   it('shows personal history and hides team navigation when no team is joined', async () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
     mockLoadTeamInboxReview.mockResolvedValue({
-      activeTeamId: null,
+      teamId: null,
       teamName: null,
       mode: 'worker-history',
       items: []
@@ -602,22 +602,14 @@ describe('App permissions flow', () => {
     expect(screen.queryByText('Select cards')).toBeNull();
   });
 
-  it('does not auto-select the first accessible team and lets the user switch teams from team', async () => {
+  it('loads the current company team without any switch controls', async () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
-    mockLoadAccessibleTeams.mockResolvedValue([
-      {
-        createdAt: '2026-05-01T08:00:00Z',
-        createdBy: 'leader-1',
-        id: 'team-1',
-        name: 'North Hall'
-      },
-      {
-        createdAt: '2026-05-01T09:00:00Z',
-        createdBy: 'leader-1',
-        id: 'team-2',
-        name: 'South Hall'
-      }
-    ]);
+    mockLoadCurrentTeam.mockResolvedValue({
+      createdAt: '2026-05-01T08:00:00Z',
+      createdBy: 'leader-1',
+      id: 'team-1',
+      name: 'North Hall'
+    });
 
     await renderAppReady();
     await act(async () => {
@@ -625,30 +617,22 @@ describe('App permissions flow', () => {
       await Promise.resolve();
     });
 
-    expect(mockSetActiveTeamId).not.toHaveBeenCalledWith('team-1');
-
     fireEvent.press(screen.getByText('Team'));
 
     await act(async () => {
       await Promise.resolve();
     });
 
+    expect(screen.getByText('Company team')).toBeTruthy();
     expect(screen.getByText('North Hall')).toBeTruthy();
-    expect(screen.getByText('South Hall')).toBeTruthy();
-
-    fireEvent.press(screen.getAllByText('Make active')[0]);
-
-    await act(async () => {
-      await Promise.resolve();
-    });
-
-    expect(mockSetActiveTeamId).toHaveBeenCalledWith('team-1');
+    expect(screen.queryByText('Make active')).toBeNull();
+    expect(screen.queryByText('Switch team')).toBeNull();
   });
 
   it('renders the team inbox for leader review mode', async () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
     mockLoadTeamInboxReview.mockResolvedValue({
-      activeTeamId: 'team-1',
+      teamId: 'team-1',
       teamName: 'North Hall',
       mode: 'leader-inbox',
       items: [
@@ -672,7 +656,7 @@ describe('App permissions flow', () => {
 
     await renderAppReady();
 
-    fireEvent.press(screen.getAllByText('History')[0]);
+    fireEvent.press(screen.getAllByText('Inbox')[0]);
 
     await act(async () => {
       await Promise.resolve();
@@ -686,7 +670,7 @@ describe('App permissions flow', () => {
   it('lets a leader edit parsed scan details from the team inbox', async () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
     mockLoadTeamInboxReview.mockResolvedValue({
-      activeTeamId: 'team-1',
+      teamId: 'team-1',
       teamName: 'North Hall',
       mode: 'leader-inbox',
       items: [
@@ -714,7 +698,7 @@ describe('App permissions flow', () => {
 
     await renderAppReady();
 
-    fireEvent.press(screen.getAllByText('History')[0]);
+    fireEvent.press(screen.getAllByText('Inbox')[0]);
 
     await act(async () => {
       await Promise.resolve();
@@ -744,6 +728,26 @@ describe('App permissions flow', () => {
 
   it('lets a leader create and approve a batch from the team inbox', async () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+    mockLoadCurrentTeam.mockResolvedValue({
+      createdAt: '2026-05-04T10:00:00Z',
+      createdBy: 'user-1',
+      id: 'team-1',
+      name: 'North Hall'
+    });
+    mockLoadTeamMembers.mockResolvedValue([
+      {
+        createdAt: '2026-05-04T10:00:00Z',
+        email: 'user@example.com',
+        isLeader: true,
+        userId: 'user-1'
+      },
+      {
+        createdAt: '2026-05-04T10:01:00Z',
+        email: 'worker@example.com',
+        isLeader: false,
+        userId: 'worker-2'
+      }
+    ]);
     mockLoadPendingTeamAssignmentBatch
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({
@@ -757,7 +761,7 @@ describe('App permissions flow', () => {
         ]
       });
     mockLoadTeamInboxReview.mockResolvedValue({
-      activeTeamId: 'team-1',
+      teamId: 'team-1',
       teamName: 'North Hall',
       mode: 'leader-inbox',
       items: [
@@ -784,7 +788,7 @@ describe('App permissions flow', () => {
 
     await renderAppReady();
 
-    fireEvent.press(screen.getAllByText('History')[0]);
+    fireEvent.press(screen.getAllByText('Inbox')[0]);
 
     await act(async () => {
       await Promise.resolve();
@@ -811,11 +815,42 @@ describe('App permissions flow', () => {
       await Promise.resolve();
     });
 
-    expect(mockApproveTeamAssignmentBatch).toHaveBeenCalledWith('batch-7');
+    expect(mockApproveTeamAssignmentBatch).toHaveBeenCalledWith('batch-7', [
+      {
+        count: 1,
+        userId: 'worker-2'
+      }
+    ]);
   });
 
   it('lets a leader edit the pending batch from the team inbox', async () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+    mockLoadCurrentTeam.mockResolvedValue({
+      createdAt: '2026-05-04T10:00:00Z',
+      createdBy: 'user-1',
+      id: 'team-1',
+      name: 'North Hall'
+    });
+    mockLoadTeamMembers.mockResolvedValue([
+      {
+        createdAt: '2026-05-04T10:00:00Z',
+        email: 'user@example.com',
+        isLeader: true,
+        userId: 'user-1'
+      },
+      {
+        createdAt: '2026-05-04T10:01:00Z',
+        email: 'worker@example.com',
+        isLeader: false,
+        userId: 'worker-2'
+      },
+      {
+        createdAt: '2026-05-04T10:02:00Z',
+        email: 'worker2@example.com',
+        isLeader: false,
+        userId: 'worker-3'
+      }
+    ]);
     mockLoadPendingTeamAssignmentBatch.mockResolvedValue({
       batchId: 'batch-7',
       scanCount: 1,
@@ -827,7 +862,7 @@ describe('App permissions flow', () => {
       ]
     });
     mockLoadTeamInboxReview.mockResolvedValue({
-      activeTeamId: 'team-1',
+      teamId: 'team-1',
       teamName: 'North Hall',
       mode: 'leader-inbox',
       items: [
@@ -874,7 +909,7 @@ describe('App permissions flow', () => {
 
     await renderAppReady();
 
-    fireEvent.press(screen.getAllByText('History')[0]);
+    fireEvent.press(screen.getAllByText('Inbox')[0]);
 
     await act(async () => {
       await Promise.resolve();
@@ -906,17 +941,14 @@ describe('App permissions flow', () => {
 
   it('lets a leader reassign an assigned scan from the team inbox', async () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
-    mockGetActiveTeamId.mockResolvedValue('team-1');
-    mockLoadAccessibleTeams.mockResolvedValue([
-      {
-        createdAt: '2026-05-04T10:00:00Z',
-        createdBy: 'leader-1',
-        id: 'team-1',
-        name: 'North Hall'
-      }
-    ]);
+    mockLoadCurrentTeam.mockResolvedValue({
+      createdAt: '2026-05-04T10:00:00Z',
+      createdBy: 'leader-1',
+      id: 'team-1',
+      name: 'North Hall'
+    });
     mockLoadTeamInboxReview.mockResolvedValue({
-      activeTeamId: 'team-1',
+      teamId: 'team-1',
       teamName: 'North Hall',
       mode: 'leader-inbox',
       items: [
@@ -957,7 +989,7 @@ describe('App permissions flow', () => {
 
     await renderAppReady();
 
-    fireEvent.press(screen.getAllByText('History')[0]);
+    fireEvent.press(screen.getAllByText('Inbox')[0]);
 
     await act(async () => {
       await Promise.resolve();
@@ -982,7 +1014,7 @@ describe('App permissions flow', () => {
   it('renders worker-scoped history copy for non-leader mode', async () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
     mockLoadTeamInboxReview.mockResolvedValue({
-      activeTeamId: 'team-1',
+      teamId: 'team-1',
       teamName: 'North Hall',
       mode: 'worker-history',
       items: [
@@ -1005,13 +1037,13 @@ describe('App permissions flow', () => {
 
     await renderAppReady();
 
-    fireEvent.press(screen.getAllByText('History')[0]);
+    fireEvent.press(screen.getAllByText('Assignments')[0]);
 
     await act(async () => {
       await Promise.resolve();
     });
 
-    expect(screen.getByText('Assignments')).toBeTruthy();
+    expect(screen.getAllByText('Assignments').length).toBeGreaterThan(0);
     expect(screen.queryByText('Team Inbox')).toBeNull();
     expect(screen.queryByText('Captured by worker-2')).toBeNull();
   });
@@ -1046,15 +1078,6 @@ describe('App permissions flow', () => {
       id: 'team-9',
       name: 'North Hall'
     });
-    mockLoadAccessibleTeams.mockResolvedValueOnce([]);
-    mockLoadAccessibleTeams.mockResolvedValueOnce([
-      {
-        createdAt: '2026-05-04T10:00:00Z',
-        createdBy: 'user-1',
-        id: 'team-9',
-        name: 'North Hall'
-      }
-    ]);
 
     await renderAppReady();
 
@@ -1077,28 +1100,25 @@ describe('App permissions flow', () => {
     });
 
     expect(mockCreateTeam).toHaveBeenCalledWith('North Hall');
-    expect(mockSetActiveTeamId).toHaveBeenCalledWith('team-9');
+    expect(screen.getAllByText('Team').length).toBeGreaterThan(0);
 
     fireEvent.press(screen.getByText('Team'));
 
     await waitFor(() => {
-      expect(screen.getByText('Active team')).toBeTruthy();
+      expect(screen.getByText('Company team')).toBeTruthy();
     });
-    expect(screen.getByText('Pending invite')).toBeTruthy();
+    expect(screen.getByText('North Hall')).toBeTruthy();
     expect(screen.queryByText('Create your first team')).toBeNull();
   });
 
   it('sends a team invite from the team page', async () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
-    mockGetActiveTeamId.mockResolvedValue('team-1');
-    mockLoadAccessibleTeams.mockResolvedValue([
-      {
-        createdAt: '2026-05-04T10:00:00Z',
-        createdBy: 'user-1',
-        id: 'team-1',
-        name: 'Main Team'
-      }
-    ]);
+    mockLoadCurrentTeam.mockResolvedValue({
+      createdAt: '2026-05-04T10:00:00Z',
+      createdBy: 'user-1',
+      id: 'team-1',
+      name: 'Main Team'
+    });
     mockLoadTeamMembers.mockResolvedValue([
       {
         createdAt: '2026-05-04T10:00:00Z',
@@ -1133,7 +1153,7 @@ describe('App permissions flow', () => {
   it('updates assignment state from the worker history rows', async () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
     mockLoadTeamInboxReview.mockResolvedValue({
-      activeTeamId: 'team-1',
+      teamId: 'team-1',
       teamName: 'North Hall',
       mode: 'worker-history',
       items: [
@@ -1158,7 +1178,7 @@ describe('App permissions flow', () => {
 
     await renderAppReady();
 
-    fireEvent.press(screen.getAllByText('History')[0]);
+    fireEvent.press(screen.getAllByText('Assignments')[0]);
 
     await act(async () => {
       await Promise.resolve();
@@ -1190,7 +1210,12 @@ describe('App permissions flow', () => {
 
   it('renders a dev gallery picker button and routes selected image through capture pipeline', async () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
-    mockGetActiveTeamId.mockResolvedValue('team-77');
+    mockLoadCurrentTeam.mockResolvedValue({
+      createdAt: '2026-05-04T10:00:00Z',
+      createdBy: 'user-1',
+      id: 'team-77',
+      name: 'North Hall'
+    });
     (ImagePicker.launchImageLibraryAsync as jest.Mock).mockResolvedValue({
       assets: [{ uri: 'file:///tmp/gallery-card.jpg' }],
       canceled: false
@@ -1221,7 +1246,7 @@ describe('App permissions flow', () => {
     expect(mockExtractText).toHaveBeenCalledWith('file:///cache/lead-5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg');
     expect(mockUploadCardImage).toHaveBeenCalledWith('file:///cache/lead-5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg', leadId);
     expect(mockParseCardPreview).toHaveBeenCalledWith({
-      teamId: null,
+      teamId: 'team-77',
       imagePath: 'card-images/user-1/5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg',
       imagePaths: ['card-images/user-1/5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg'],
       leadId,
@@ -1236,7 +1261,7 @@ describe('App permissions flow', () => {
     });
 
     expect(mockSaveParsedCard).toHaveBeenCalledWith({
-      teamId: null,
+      teamId: 'team-77',
       imagePath: 'card-images/user-1/5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg',
       imagePaths: ['card-images/user-1/5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg'],
       leadId,
@@ -1380,7 +1405,12 @@ describe('App permissions flow', () => {
   it('runs prepare -> OCR -> parse preview -> reviewed save without spinner', async () => {
     const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(jest.fn());
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
-    mockGetActiveTeamId.mockResolvedValue('team-99');
+    mockLoadCurrentTeam.mockResolvedValue({
+      createdAt: '2026-05-04T10:00:00Z',
+      createdBy: 'leader-1',
+      id: 'team-99',
+      name: 'North Hall'
+    });
     mockTakePictureAsync.mockResolvedValue({
       height: 100,
       uri: 'file:///tmp/card.jpg',
@@ -1417,7 +1447,7 @@ describe('App permissions flow', () => {
     });
 
     expect(mockSaveParsedCard).toHaveBeenCalledWith({
-      teamId: null,
+      teamId: 'team-99',
       imagePath: 'card-images/user-1/5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg',
       imagePaths: ['card-images/user-1/5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg'],
       leadId,
@@ -1489,7 +1519,12 @@ describe('App permissions flow', () => {
 
   it('lets the user edit parsed fields before saving', async () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
-    mockGetActiveTeamId.mockResolvedValue('team-99');
+    mockLoadCurrentTeam.mockResolvedValue({
+      createdAt: '2026-05-04T10:00:00Z',
+      createdBy: 'leader-1',
+      id: 'team-99',
+      name: 'North Hall'
+    });
     mockTakePictureAsync.mockResolvedValue({
       height: 100,
       uri: 'file:///tmp/card.jpg',
@@ -1525,7 +1560,7 @@ describe('App permissions flow', () => {
     });
 
     expect(mockSaveParsedCard).toHaveBeenCalledWith({
-      teamId: null,
+      teamId: 'team-99',
       imagePath: 'card-images/user-1/5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg',
       imagePaths: ['card-images/user-1/5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg'],
       leadId,
@@ -1544,7 +1579,12 @@ describe('App permissions flow', () => {
 
   it('lets the user move a parsed value block to the correct field before saving', async () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
-    mockGetActiveTeamId.mockResolvedValue('team-99');
+    mockLoadCurrentTeam.mockResolvedValue({
+      createdAt: '2026-05-04T10:00:00Z',
+      createdBy: 'leader-1',
+      id: 'team-99',
+      name: 'North Hall'
+    });
     mockTakePictureAsync.mockResolvedValue({
       height: 100,
       uri: 'file:///tmp/card.jpg',
@@ -1590,7 +1630,7 @@ describe('App permissions flow', () => {
     });
 
     expect(mockSaveParsedCard).toHaveBeenCalledWith({
-      teamId: null,
+      teamId: 'team-99',
       imagePath: 'card-images/user-1/5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg',
       imagePaths: ['card-images/user-1/5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg'],
       leadId,
@@ -1609,7 +1649,12 @@ describe('App permissions flow', () => {
 
   it('updates an already-created preview lead when final reviewed save reports insert failed', async () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
-    mockGetActiveTeamId.mockResolvedValue('team-99');
+    mockLoadCurrentTeam.mockResolvedValue({
+      createdAt: '2026-05-04T10:00:00Z',
+      createdBy: 'leader-1',
+      id: 'team-99',
+      name: 'North Hall'
+    });
     mockTakePictureAsync.mockResolvedValue({
       height: 100,
       uri: 'file:///tmp/card.jpg',
@@ -1668,11 +1713,11 @@ describe('App permissions flow', () => {
     expect(screen.queryByText('Review parsed fields')).toBeNull();
   });
 
-  it('continues capture routing without team context when active team lookup fails', async () => {
+  it('continues capture routing without team context when current team lookup fails', async () => {
     const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(jest.fn());
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(jest.fn());
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
-    mockGetActiveTeamId.mockRejectedValue(new Error('context lookup failed'));
+    mockLoadCurrentTeam.mockRejectedValue(new Error('context lookup failed'));
     mockTakePictureAsync.mockResolvedValue({
       height: 100,
       uri: 'file:///tmp/card.jpg',
@@ -1721,7 +1766,7 @@ describe('App permissions flow', () => {
     });
     expect(alertSpy).not.toHaveBeenCalled();
     expect(warnSpy).toHaveBeenCalledWith(
-      'Team directory load failed',
+      'Team lookup failed',
       expect.any(Error)
     );
   });

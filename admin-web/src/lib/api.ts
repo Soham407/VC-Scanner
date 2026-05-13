@@ -117,7 +117,7 @@ export async function createTeam(name: string): Promise<AccessibleTeam> {
 
 export async function getActiveTeamId(userId: string): Promise<string | null> {
   const { data, error } = await supabase
-    .from('user_team_contexts')
+    .from('team_memberships')
     .select('team_id')
     .eq('user_id', userId)
     .maybeSingle();
@@ -156,22 +156,6 @@ export async function getTeamAccess(teamId: string | null, userId: string): Prom
     teamId: team.id,
     teamName: team.name
   };
-}
-
-export async function setActiveTeamId(teamId: string | null): Promise<void> {
-  const { data: userData, error: userError } = await supabase.auth.getUser();
-  if (userError || !userData.user) throw new Error('Authenticated user required');
-
-  if (teamId === null) {
-    const { error } = await supabase.from('user_team_contexts').delete().eq('user_id', userData.user.id);
-    if (error) throw new Error(error.message);
-    return;
-  }
-
-  const { error } = await supabase
-    .from('user_team_contexts')
-    .upsert({ team_id: teamId, user_id: userData.user.id }, { onConflict: 'user_id' });
-  if (error) throw new Error(error.message);
 }
 
 export async function loadTeamLeads(teamId: string): Promise<Lead[]> {
@@ -411,8 +395,14 @@ export async function removeBatchItem(batchId: string, leadId: string): Promise<
   if (error) throw new Error(error.message);
 }
 
-export async function approveBatch(batchId: string): Promise<number> {
-  const { data, error } = await supabase.rpc('approve_team_assignment_batch', { target_batch_id: batchId });
+export async function approveBatch(
+  batchId: string,
+  allocations: Array<{ count: number; userId: string }>
+): Promise<number> {
+  const { data, error } = await supabase.rpc('approve_team_assignment_batch', {
+    target_batch_id: batchId,
+    worker_allocations: allocations
+  });
   if (error) throw new Error(error.message);
   const row = firstRow(data as Array<{ assigned_count: number }> | { assigned_count: number } | null);
   return row?.assigned_count ?? 0;

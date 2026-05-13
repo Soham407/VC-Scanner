@@ -1,6 +1,7 @@
 import {
   addTeamAssignmentBatchItem,
   approveTeamAssignmentBatch,
+  buildDefaultWorkerAllocations,
   createTeamAssignmentBatch,
   loadPendingTeamAssignmentBatch,
   reassignTeamAssignment,
@@ -69,13 +70,52 @@ describe('teamAssignments', () => {
       error: null
     });
 
-    await expect(approveTeamAssignmentBatch('batch-1')).resolves.toEqual({
+    await expect(approveTeamAssignmentBatch('batch-1', [
+      {
+        count: 2,
+        userId: 'worker-1'
+      },
+      {
+        count: 1,
+        userId: 'worker-2'
+      }
+    ])).resolves.toEqual({
       assignedCount: 3
     });
 
     expect(supabase.rpc).toHaveBeenCalledWith('approve_team_assignment_batch', {
-      target_batch_id: 'batch-1'
+      target_batch_id: 'batch-1',
+      worker_allocations: [
+        {
+          count: 2,
+          userId: 'worker-1'
+        },
+        {
+          count: 1,
+          userId: 'worker-2'
+        }
+      ]
     });
+  });
+
+  it('builds equal allocations and randomizes the extra card across workers', () => {
+    const randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0);
+
+    const allocations = buildDefaultWorkerAllocations([
+      { userId: 'worker-1' },
+      { userId: 'worker-2' },
+      { userId: 'worker-3' }
+    ], 4);
+
+    expect(allocations).toHaveLength(3);
+    expect(allocations.map((allocation) => allocation.userId)).toEqual([
+      'worker-1',
+      'worker-2',
+      'worker-3'
+    ]);
+    expect(allocations.map((allocation) => allocation.count).sort()).toEqual([1, 1, 2]);
+
+    randomSpy.mockRestore();
   });
 
   it('loads the current pending batch for a team', async () => {

@@ -1,18 +1,19 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 
 import {
   addTeamAssignmentBatchItem,
   approveTeamAssignmentBatch,
+  buildDefaultWorkerAllocations,
   createTeamAssignmentBatch,
   loadPendingTeamAssignmentBatch,
   reassignTeamAssignment,
   removeTeamAssignmentBatchItem,
+  type TeamWorkerAllocation,
   type AssignmentState,
   type PendingTeamAssignmentBatch
 } from '../lib/teamAssignments';
-import { getActiveTeamId, setActiveTeamId } from '../lib/teamContext';
-import { createTeam, loadAccessibleTeams, type AccessibleTeam } from '../lib/teams';
+import { createTeam, loadCurrentTeam, type AccessibleTeam } from '../lib/teams';
 import { loadTeamInboxReview, type TeamInboxItem, type TeamInboxReview } from '../lib/teamInbox';
 import {
   createTeamInvite,
@@ -27,14 +28,12 @@ import { updateTeamAssignmentState } from '../lib/teamAssignments';
 import { updateScannedLeadDetails, type ScannedLeadDetailsUpdate } from '../lib/teamReview';
 
 export type TeamWorkspaceState = {
-  activeTeamId: string | null;
-  activeTeamName: string | null;
+  team: AccessibleTeam | null;
   hasTeamWorkspace: boolean;
-  teams: AccessibleTeam[];
   createTeam: (teamName: string) => Promise<void>;
   createBatch: () => void;
   createInvite: (invitedEmail: string) => Promise<void>;
-  historyActiveTeamId: string | null;
+  historyTeamId: string | null;
   historyTeamName: string | null;
   historyItems: TeamInboxItem[];
   historyMode: TeamInboxReview['mode'];
@@ -51,9 +50,11 @@ export type TeamWorkspaceState = {
   pendingBatchId: string | null;
   pendingBatchItems: PendingTeamAssignmentBatch['items'];
   pendingBatchScanCount: number;
+  pendingBatchAllocations: TeamWorkerAllocation[];
+  updatePendingBatchAllocation: (userId: string, count: number) => void;
   pendingInvite: PendingTeamInvite | null;
   teamPendingInvites: TeamPendingInvite[];
-  approveBatch: () => void;
+  approveBatch: (allocations?: TeamWorkerAllocation[]) => Promise<void>;
   addBatchItem: (scannedLeadId: string) => Promise<void>;
   removeBatchItem: (scannedLeadId: string) => Promise<void>;
   promoteMember: (userId: string) => Promise<void>;
@@ -61,19 +62,18 @@ export type TeamWorkspaceState = {
   updateAssignmentState: (scannedLeadId: string, assignmentState: AssignmentState) => Promise<void>;
   reassignAssignment: (scannedLeadId: string, targetUserId: string) => Promise<void>;
   respondToInvite: (decision: 'accept' | 'decline') => Promise<void>;
-  selectTeam: (teamId: string) => void;
 };
 
 function resetWorkspaceState(
-  setTeams: (teams: AccessibleTeam[]) => void,
-  setActiveTeamIdState: (teamId: string | null) => void,
+  setTeam: (team: AccessibleTeam | null) => void,
   setHistoryMode: (mode: TeamInboxReview['mode']) => void,
   setHistoryItems: (items: TeamInboxItem[]) => void,
   setHistoryTeamName: (name: string | null) => void,
-  setHistoryActiveTeamId: (teamId: string | null) => void,
+  setHistoryTeamId: (teamId: string | null) => void,
   setPendingBatchId: (batchId: string | null) => void,
   setPendingBatchItems: (items: PendingTeamAssignmentBatch['items']) => void,
   setPendingBatchScanCount: (scanCount: number) => void,
+  setPendingBatchAllocations: (allocations: TeamWorkerAllocation[]) => void,
   setIsBatchActionLoading: (loading: boolean) => void,
   setIsAssignmentReassignmentLoading: (loading: boolean) => void,
   setPendingInvites: (invites: PendingTeamInvite[]) => void,
@@ -82,15 +82,15 @@ function resetWorkspaceState(
   setIsTeamMembersLoading: (loading: boolean) => void,
   setIsInviteGateReady: (ready: boolean) => void
 ): void {
-  setTeams([]);
-  setActiveTeamIdState(null);
+  setTeam(null);
   setHistoryMode('worker-history');
   setHistoryItems([]);
   setHistoryTeamName(null);
-  setHistoryActiveTeamId(null);
+  setHistoryTeamId(null);
   setPendingBatchId(null);
   setPendingBatchItems([]);
   setPendingBatchScanCount(0);
+  setPendingBatchAllocations([]);
   setIsBatchActionLoading(false);
   setIsAssignmentReassignmentLoading(false);
   setPendingInvites([]);
@@ -101,19 +101,19 @@ function resetWorkspaceState(
 }
 
 export function useTeamWorkspace(session: Session | null | undefined): TeamWorkspaceState {
-  const [teams, setTeams] = useState<AccessibleTeam[]>([]);
-  const [activeTeamId, setActiveTeamIdState] = useState<string | null>(null);
+  const [team, setTeam] = useState<AccessibleTeam | null>(null);
   const [isTeamsLoading, setIsTeamsLoading] = useState(false);
   const [isTeamCreationLoading, setIsTeamCreationLoading] = useState(false);
   const [isTeamMembersLoading, setIsTeamMembersLoading] = useState(false);
   const [historyMode, setHistoryMode] = useState<TeamInboxReview['mode']>('worker-history');
   const [historyItems, setHistoryItems] = useState<TeamInboxItem[]>([]);
   const [historyTeamName, setHistoryTeamName] = useState<string | null>(null);
-  const [historyActiveTeamId, setHistoryActiveTeamId] = useState<string | null>(null);
+  const [historyTeamId, setHistoryTeamId] = useState<string | null>(null);
   const [isHistoryLoading, setIsHistoryLoading] = useState(false);
   const [pendingBatchId, setPendingBatchId] = useState<string | null>(null);
   const [pendingBatchItems, setPendingBatchItems] = useState<PendingTeamAssignmentBatch['items']>([]);
   const [pendingBatchScanCount, setPendingBatchScanCount] = useState<number>(0);
+  const [pendingBatchAllocations, setPendingBatchAllocations] = useState<TeamWorkerAllocation[]>([]);
   const [isBatchActionLoading, setIsBatchActionLoading] = useState(false);
   const [isAssignmentReassignmentLoading, setIsAssignmentReassignmentLoading] = useState(false);
   const [isInviteCreationLoading, setIsInviteCreationLoading] = useState(false);
@@ -123,40 +123,34 @@ export function useTeamWorkspace(session: Session | null | undefined): TeamWorks
   const [isInviteDecisionSubmitting, setIsInviteDecisionSubmitting] = useState(false);
   const [members, setMembers] = useState<TeamMember[]>([]);
 
-  const refreshTeamSelection = useCallback(async (): Promise<void> => {
+  const workerMembers = useMemo(() => members.filter((member) => !member.isLeader), [members]);
+
+  const refreshTeam = useCallback(async (): Promise<void> => {
+    if (!session?.user.id) {
+      setTeam(null);
+      setIsTeamsLoading(false);
+      return;
+    }
+
     setIsTeamsLoading(true);
 
     try {
-      const [nextTeams, nextActiveTeamId] = await Promise.all([
-        loadAccessibleTeams(),
-        getActiveTeamId()
-      ]);
-
-      const validActiveTeamId = nextTeams.some((team) => team.id === nextActiveTeamId)
-        ? nextActiveTeamId
-        : null;
-
-      setTeams(nextTeams);
-      setActiveTeamIdState(validActiveTeamId);
-
-      if (nextActiveTeamId && !validActiveTeamId) {
-        await setActiveTeamId(null);
-      }
+      const nextTeam = await loadCurrentTeam(session.user.id);
+      setTeam(nextTeam);
     } catch (error) {
-      console.warn('Team directory load failed', error);
-      setTeams([]);
-      setActiveTeamIdState(null);
+      console.warn('Team lookup failed', error);
+      setTeam(null);
     } finally {
       setIsTeamsLoading(false);
     }
-  }, []);
+  }, [session?.user.id]);
 
   const refreshHistory = useCallback(async (): Promise<void> => {
     if (!session?.user.id) {
       setHistoryMode('worker-history');
       setHistoryTeamName(null);
       setHistoryItems([]);
-      setHistoryActiveTeamId(null);
+      setHistoryTeamId(null);
       return;
     }
 
@@ -167,20 +161,22 @@ export function useTeamWorkspace(session: Session | null | undefined): TeamWorks
       setHistoryMode(result.mode);
       setHistoryTeamName(result.teamName);
       setHistoryItems(result.items);
-      setHistoryActiveTeamId(result.activeTeamId);
+      setHistoryTeamId(result.teamId);
     } catch (error) {
       setHistoryMode('worker-history');
       setHistoryTeamName(null);
       setHistoryItems([]);
-      setHistoryActiveTeamId(null);
+      setHistoryTeamId(null);
       console.warn('Team inbox review fetch failed', error);
     } finally {
       setIsHistoryLoading(false);
     }
   }, [session?.user.id]);
 
-  const refreshMembers = useCallback(async (): Promise<void> => {
-    if (!activeTeamId) {
+  const refreshMembers = useCallback(async (teamId?: string): Promise<void> => {
+    const effectiveTeamId = teamId ?? team?.id;
+
+    if (!effectiveTeamId) {
       setMembers([]);
       setIsTeamMembersLoading(false);
       return;
@@ -189,7 +185,7 @@ export function useTeamWorkspace(session: Session | null | undefined): TeamWorks
     setIsTeamMembersLoading(true);
 
     try {
-      const nextMembers = await loadTeamMembers(activeTeamId);
+      const nextMembers = await loadTeamMembers(effectiveTeamId);
       setMembers(nextMembers);
     } catch (error) {
       console.warn('Team members load failed', error);
@@ -197,10 +193,10 @@ export function useTeamWorkspace(session: Session | null | undefined): TeamWorks
     } finally {
       setIsTeamMembersLoading(false);
     }
-  }, [activeTeamId]);
+  }, [team]);
 
   const refreshPendingBatch = useCallback(async (): Promise<void> => {
-    if (historyMode !== 'leader-inbox' || !historyActiveTeamId) {
+    if (historyMode !== 'leader-inbox' || !historyTeamId) {
       setPendingBatchId(null);
       setPendingBatchItems([]);
       setPendingBatchScanCount(0);
@@ -208,7 +204,7 @@ export function useTeamWorkspace(session: Session | null | undefined): TeamWorks
     }
 
     try {
-      const nextBatch = await loadPendingTeamAssignmentBatch(historyActiveTeamId);
+      const nextBatch = await loadPendingTeamAssignmentBatch(historyTeamId);
       setPendingBatchId(nextBatch?.batchId ?? null);
       setPendingBatchItems(nextBatch?.items ?? []);
       setPendingBatchScanCount(nextBatch?.scanCount ?? 0);
@@ -218,20 +214,49 @@ export function useTeamWorkspace(session: Session | null | undefined): TeamWorks
       setPendingBatchItems([]);
       setPendingBatchScanCount(0);
     }
-  }, [historyActiveTeamId, historyMode]);
+  }, [historyTeamId, historyMode]);
+
+  useEffect(() => {
+    if (pendingBatchId && workerMembers.length > 0 && pendingBatchScanCount > 0) {
+      setPendingBatchAllocations(buildDefaultWorkerAllocations(
+        workerMembers.map((member) => ({ userId: member.userId })),
+        pendingBatchScanCount
+      ));
+      return;
+    }
+
+    setPendingBatchAllocations([]);
+  }, [pendingBatchId, pendingBatchScanCount, workerMembers]);
+
+  const updatePendingBatchAllocation = useCallback((userId: string, count: number) => {
+    const normalizedCount = Math.max(0, Math.trunc(count));
+    setPendingBatchAllocations((currentAllocations) => {
+      const nextAllocations = currentAllocations.map((allocation) =>
+        allocation.userId === userId
+          ? { ...allocation, count: normalizedCount }
+          : allocation
+      );
+
+      if (nextAllocations.some((allocation) => allocation.userId === userId)) {
+        return nextAllocations;
+      }
+
+      return [...nextAllocations, { userId, count: normalizedCount }];
+    });
+  }, []);
 
   useEffect(() => {
     if (!session?.user.id) {
       resetWorkspaceState(
-        setTeams,
-        setActiveTeamIdState,
+        setTeam,
         setHistoryMode,
         setHistoryItems,
         setHistoryTeamName,
-        setHistoryActiveTeamId,
+        setHistoryTeamId,
         setPendingBatchId,
         setPendingBatchItems,
         setPendingBatchScanCount,
+        setPendingBatchAllocations,
         setIsBatchActionLoading,
         setIsAssignmentReassignmentLoading,
         setPendingInvites,
@@ -243,12 +268,12 @@ export function useTeamWorkspace(session: Session | null | undefined): TeamWorks
       return;
     }
 
-    void refreshTeamSelection();
-  }, [refreshTeamSelection, session?.user.id]);
+    void refreshTeam();
+  }, [refreshTeam, session?.user.id]);
 
   useEffect(() => {
     void refreshHistory();
-  }, [activeTeamId, refreshHistory]);
+  }, [refreshHistory, team]);
 
   useEffect(() => {
     void refreshPendingBatch();
@@ -256,7 +281,7 @@ export function useTeamWorkspace(session: Session | null | undefined): TeamWorks
 
   useEffect(() => {
     void refreshMembers();
-  }, [activeTeamId, refreshMembers]);
+  }, [refreshMembers, team]);
 
   useEffect(() => {
     if (session === undefined) {
@@ -297,29 +322,15 @@ export function useTeamWorkspace(session: Session | null | undefined): TeamWorks
     };
   }, [session?.user.email, session?.user.id, session]);
 
-  const selectTeam = useCallback(
-    (teamId: string) => {
-      void (async () => {
-        try {
-          await setActiveTeamId(teamId);
-          setActiveTeamIdState(teamId);
-        } catch (error) {
-          console.warn('Team switch failed', error);
-        }
-      })();
-    },
-    []
-  );
-
   const createBatch = useCallback(() => {
-    if (historyMode !== 'leader-inbox' || !historyActiveTeamId || isBatchActionLoading) {
+    if (historyMode !== 'leader-inbox' || !historyTeamId || isBatchActionLoading) {
       return;
     }
 
     setIsBatchActionLoading(true);
     void (async () => {
       try {
-        const result = await createTeamAssignmentBatch(historyActiveTeamId);
+        const result = await createTeamAssignmentBatch(historyTeamId);
         setPendingBatchId(result.batchId);
         setPendingBatchScanCount(result.scanCount);
         setPendingBatchItems([]);
@@ -330,11 +341,11 @@ export function useTeamWorkspace(session: Session | null | undefined): TeamWorks
         setIsBatchActionLoading(false);
       }
     })();
-  }, [historyActiveTeamId, historyMode, isBatchActionLoading, refreshPendingBatch]);
+  }, [historyTeamId, historyMode, isBatchActionLoading, refreshPendingBatch]);
 
   const createInvite = useCallback(
     async (invitedEmail: string): Promise<void> => {
-      if (!activeTeamId || isInviteCreationLoading) {
+      if (!team || isInviteCreationLoading) {
         return;
       }
 
@@ -342,10 +353,10 @@ export function useTeamWorkspace(session: Session | null | undefined): TeamWorks
 
       try {
         await createTeamInvite({
-          teamId: activeTeamId,
+          teamId: team.id,
           invitedEmail
         });
-        const nextTeamInvites = await listPendingTeamInvitesForTeam(activeTeamId);
+        const nextTeamInvites = await listPendingTeamInvitesForTeam(team.id);
         setTeamPendingInvites(nextTeamInvites);
         await refreshMembers();
       } catch (error) {
@@ -355,11 +366,11 @@ export function useTeamWorkspace(session: Session | null | undefined): TeamWorks
         setIsInviteCreationLoading(false);
       }
     },
-    [activeTeamId, isInviteCreationLoading, refreshMembers]
+    [isInviteCreationLoading, refreshMembers, team]
   );
 
   useEffect(() => {
-    if (!activeTeamId) {
+    if (!team) {
       setTeamPendingInvites([]);
       return;
     }
@@ -368,7 +379,7 @@ export function useTeamWorkspace(session: Session | null | undefined): TeamWorks
 
     void (async () => {
       try {
-        const nextTeamInvites = await listPendingTeamInvitesForTeam(activeTeamId);
+        const nextTeamInvites = await listPendingTeamInvitesForTeam(team.id);
         if (!cancelled) {
           setTeamPendingInvites(nextTeamInvites);
         }
@@ -383,18 +394,18 @@ export function useTeamWorkspace(session: Session | null | undefined): TeamWorks
     return () => {
       cancelled = true;
     };
-  }, [activeTeamId]);
+  }, [team]);
 
   const promoteMember = useCallback(
     async (userId: string): Promise<void> => {
-      if (!activeTeamId) {
+      if (!team) {
         return;
       }
 
-      await promoteTeamMemberToLeader(activeTeamId, userId);
+      await promoteTeamMemberToLeader(team.id, userId);
       await refreshMembers();
     },
-    [activeTeamId, refreshMembers]
+    [refreshMembers, team]
   );
 
   const updateAssignment = useCallback(
@@ -457,7 +468,7 @@ export function useTeamWorkspace(session: Session | null | undefined): TeamWorks
 
   const reassignAssignment = useCallback(
     async (scannedLeadId: string, targetUserId: string): Promise<void> => {
-      if (!historyActiveTeamId || isAssignmentReassignmentLoading) {
+      if (!historyTeamId || isAssignmentReassignmentLoading) {
         return;
       }
 
@@ -473,7 +484,7 @@ export function useTeamWorkspace(session: Session | null | undefined): TeamWorks
         setIsAssignmentReassignmentLoading(false);
       }
     },
-    [historyActiveTeamId, isAssignmentReassignmentLoading, refreshHistory]
+    [historyTeamId, isAssignmentReassignmentLoading, refreshHistory]
   );
 
   const createNewTeam = useCallback(
@@ -485,12 +496,10 @@ export function useTeamWorkspace(session: Session | null | undefined): TeamWorks
       setIsTeamCreationLoading(true);
 
       try {
-        const team = await createTeam(teamName);
-        await setActiveTeamId(team.id);
-        setActiveTeamIdState(team.id);
-        await refreshTeamSelection();
-        setActiveTeamIdState(team.id);
+        const createdTeam = await createTeam(teamName);
+        setTeam(createdTeam);
         await refreshHistory();
+        await refreshMembers(createdTeam.id);
       } catch (error) {
         console.warn('Team creation failed', error);
         throw error;
@@ -498,30 +507,35 @@ export function useTeamWorkspace(session: Session | null | undefined): TeamWorks
         setIsTeamCreationLoading(false);
       }
     },
-    [isTeamCreationLoading, refreshTeamSelection, refreshHistory]
+    [isTeamCreationLoading, refreshHistory, refreshMembers]
   );
 
-  const approveBatch = useCallback(() => {
-    if (historyMode !== 'leader-inbox' || !pendingBatchId || isBatchActionLoading) {
-      return;
-    }
+  const approveBatch = useCallback(
+    async (allocations: TeamWorkerAllocation[] = pendingBatchAllocations): Promise<void> => {
+      if (historyMode !== 'leader-inbox' || !pendingBatchId || isBatchActionLoading) {
+        return;
+      }
 
-    setIsBatchActionLoading(true);
-    void (async () => {
+      setIsBatchActionLoading(true);
+
       try {
-        await approveTeamAssignmentBatch(pendingBatchId);
+        const result = await approveTeamAssignmentBatch(pendingBatchId, allocations);
         setPendingBatchId(null);
         setPendingBatchItems([]);
         setPendingBatchScanCount(0);
+        setPendingBatchAllocations([]);
         await refreshHistory();
         await refreshPendingBatch();
+        console.info('Approved team assignment batch', result.assignedCount);
       } catch (error) {
         console.warn('Batch approval failed', error);
+        throw error;
       } finally {
         setIsBatchActionLoading(false);
       }
-    })();
-  }, [historyMode, isBatchActionLoading, pendingBatchId, refreshHistory, refreshPendingBatch]);
+    },
+    [historyMode, isBatchActionLoading, pendingBatchAllocations, pendingBatchId, refreshHistory, refreshPendingBatch]
+  );
 
   const respondToInvite = useCallback(
     async (decision: 'accept' | 'decline'): Promise<void> => {
@@ -537,11 +551,9 @@ export function useTeamWorkspace(session: Session | null | undefined): TeamWorks
         setPendingInvites((currentInvites) => currentInvites.filter((invite) => invite.id !== activeInvite.id));
 
         if (decision === 'accept') {
-          await setActiveTeamId(activeInvite.teamId);
-          setActiveTeamIdState(activeInvite.teamId);
-          await refreshTeamSelection();
-          setActiveTeamIdState(activeInvite.teamId);
+          await refreshTeam();
           await refreshHistory();
+          await refreshMembers(activeInvite.teamId);
         }
       } catch (error) {
         console.warn('Team invite response failed', error);
@@ -550,22 +562,19 @@ export function useTeamWorkspace(session: Session | null | undefined): TeamWorks
         setIsInviteDecisionSubmitting(false);
       }
     },
-    [isInviteDecisionSubmitting, pendingInvites, refreshTeamSelection, refreshHistory]
+    [isInviteDecisionSubmitting, pendingInvites, refreshHistory, refreshMembers, refreshTeam]
   );
 
   const activeInvite = pendingInvites[0] ?? null;
-  const activeTeam = teams.find((team) => team.id === activeTeamId) ?? null;
 
   return {
-    activeTeamId: activeTeam?.id ?? null,
-    activeTeamName: activeTeam?.name ?? null,
-    hasTeamWorkspace: teams.length > 0,
-    teams,
+    team,
+    hasTeamWorkspace: Boolean(team),
     createTeam: createNewTeam,
     createInvite,
     approveBatch,
     createBatch,
-    historyActiveTeamId,
+    historyTeamId,
     historyTeamName,
     historyItems,
     historyMode,
@@ -582,6 +591,8 @@ export function useTeamWorkspace(session: Session | null | undefined): TeamWorks
     pendingBatchId,
     pendingBatchItems,
     pendingBatchScanCount,
+    pendingBatchAllocations,
+    updatePendingBatchAllocation,
     pendingInvite: activeInvite,
     teamPendingInvites,
     addBatchItem,
@@ -590,7 +601,6 @@ export function useTeamWorkspace(session: Session | null | undefined): TeamWorks
     updateLeadDetails: updateLead,
     respondToInvite,
     updateAssignmentState: updateAssignment,
-    reassignAssignment,
-    selectTeam
+    reassignAssignment
   };
 }

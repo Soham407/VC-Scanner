@@ -21,7 +21,7 @@ export type TeamInboxItem = {
 };
 
 export type TeamInboxReview = {
-  activeTeamId: string | null;
+  teamId: string | null;
   teamName: string | null;
   items: TeamInboxItem[];
   mode: 'leader-inbox' | 'worker-history';

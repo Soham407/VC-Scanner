@@ -1,18 +1,23 @@
 import { BottomSheetModal, BottomSheetView } from '@gorhom/bottom-sheet';
 import { forwardRef, useMemo, type ForwardedRef } from 'react';
 import { Image, ScrollView, StyleSheet, View } from 'react-native';
-import { Button, Chip, Surface, Text } from '../design/openDesign';
+import { Button, Chip, Surface, Text, TextInput } from '../design/openDesign';
 
 import type { TeamInboxItem } from '../lib/teamInbox';
+import type { TeamMember } from '../lib/teamMembers';
+import type { TeamWorkerAllocation } from '../lib/teamAssignments';
 import { useAppTheme } from '../theme/materialTheme';
 
 type TeamAssignmentBatchSheetProps = {
   availableItems: TeamInboxItem[];
   batchItems: TeamInboxItem[];
   batchScanCount: number;
+  allocations: TeamWorkerAllocation[];
   isLoading: boolean;
+  workers: TeamMember[];
   onAddItem: (scannedLeadId: string) => void;
   onRemoveItem: (scannedLeadId: string) => void;
+  onChangeAllocation: (userId: string, count: number) => void;
 };
 
 function TeamAssignmentBatchSheetImpl(
@@ -20,14 +25,19 @@ function TeamAssignmentBatchSheetImpl(
     availableItems,
     batchItems,
     batchScanCount,
+    allocations,
     isLoading,
+    workers,
     onAddItem,
-    onRemoveItem
+    onRemoveItem,
+    onChangeAllocation
   }: TeamAssignmentBatchSheetProps,
   ref: ForwardedRef<BottomSheetModal>
 ) {
   const snapPoints = useMemo(() => ['58%', '90%'], []);
   const theme = useAppTheme();
+  const allocationTotal = allocations.reduce((total, allocation) => total + allocation.count, 0);
+  const canApproveLater = batchItems.length > 0 && workers.length > 0 && allocationTotal === batchItems.length;
 
   const renderSummaryText = batchItems.length > 0
     ? `${batchItems.length} card${batchItems.length === 1 ? '' : 's'} ready to assign`
@@ -45,7 +55,7 @@ function TeamAssignmentBatchSheetImpl(
               Choose cards
             </Text>
             <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
-              Add the cards you want to give to team members now. Leave the rest in the inbox.
+              Select team inbox cards and set how many each Worker receives.
             </Text>
           </View>
           <View style={styles.headerMeta}>
@@ -60,6 +70,17 @@ function TeamAssignmentBatchSheetImpl(
         <Text style={{ color: theme.colors.onSurfaceVariant, marginBottom: 12, marginTop: 10 }} variant="bodySmall">
           {renderSummaryText}. {syncSummary}
         </Text>
+        <Surface elevation={0} style={[styles.allocationSummary, { backgroundColor: theme.colors.surfaceContainer }]}>
+          <View>
+            <Text variant="titleSmall">Worker allocation</Text>
+            <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
+              Split the selected cards across workers. The approval step only works when totals match.
+            </Text>
+          </View>
+          <Chip compact mode={canApproveLater ? 'flat' : 'outlined'} style={styles.summaryChip}>
+            {allocationTotal}/{batchItems.length || 0}
+          </Chip>
+        </Surface>
 
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           <View style={styles.section}>
@@ -96,6 +117,50 @@ function TeamAssignmentBatchSheetImpl(
                     </Button>
                   </Surface>
                 ))}
+              </View>
+            )}
+          </View>
+
+          <View style={styles.section}>
+            <Text variant="titleMedium">Worker targets</Text>
+            {workers.length === 0 ? (
+              <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 8 }} variant="bodyMedium">
+                Add workers to this team before approving assignments.
+              </Text>
+            ) : (
+              <View style={styles.list}>
+                {workers.map((worker) => {
+                  const allocation = allocations.find((entry) => entry.userId === worker.userId);
+
+                  return (
+                    <Surface
+                      key={worker.userId}
+                      elevation={0}
+                      style={[styles.allocationRow, { backgroundColor: theme.colors.surfaceContainerHighest }]}
+                    >
+                      <View style={styles.rowCopy}>
+                        <Text numberOfLines={1} variant="titleSmall">
+                          {worker.email}
+                        </Text>
+                        <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
+                          Worker assignment target
+                        </Text>
+                      </View>
+                      <TextInput
+                        keyboardType="number-pad"
+                        label="Cards"
+                        mode="outlined"
+                        onChangeText={(value) => {
+                          const nextCount = Number.parseInt(value, 10);
+                          onChangeAllocation(worker.userId, Number.isNaN(nextCount) ? 0 : nextCount);
+                        }}
+                        style={styles.allocationInput}
+                        testID={`allocation-input-${worker.userId}`}
+                        value={String(allocation?.count ?? 0)}
+                      />
+                    </Surface>
+                  );
+                })}
               </View>
             )}
           </View>
@@ -176,6 +241,24 @@ const styles = StyleSheet.create({
   },
   rowCopy: {
     flex: 1
+  },
+  allocationInput: {
+    minWidth: 96
+  },
+  allocationRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 12,
+    padding: 12
+  },
+  allocationSummary: {
+    alignItems: 'center',
+    borderRadius: 18,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12
   },
   scrollContent: {
     paddingBottom: 28

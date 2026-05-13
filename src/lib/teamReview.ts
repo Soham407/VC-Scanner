@@ -22,13 +22,13 @@ export type TeamReviewItem = {
 };
 
 export type TeamReviewResult = {
-  activeTeamId: string | null;
+  teamId: string | null;
   teamName: string | null;
   items: TeamReviewItem[];
   mode: 'leader-inbox' | 'worker-history';
 };
 
-type ActiveTeamContextRow = {
+type TeamMembershipRow = {
   team_id: string;
 };
 
@@ -181,9 +181,9 @@ async function loadWorkerAssignedWork(userId: string, activeTeamId: string): Pro
   return rows.filter((item): item is TeamReviewItem => item !== null);
 }
 
-async function loadActiveTeamId(userId: string): Promise<string | null> {
+async function loadCurrentTeamId(userId: string): Promise<string | null> {
   const { data, error } = await supabase
-    .from('user_team_contexts')
+    .from('team_memberships')
     .select('team_id')
     .eq('user_id', userId)
     .maybeSingle();
@@ -192,7 +192,7 @@ async function loadActiveTeamId(userId: string): Promise<string | null> {
     throw error;
   }
 
-  return (data as ActiveTeamContextRow | null)?.team_id ?? null;
+  return (data as TeamMembershipRow | null)?.team_id ?? null;
 }
 
 async function loadTeam(activeTeamId: string): Promise<TeamRow | null> {
@@ -261,20 +261,20 @@ async function loadLeaderInbox(activeTeamId: string): Promise<TeamReviewItem[]> 
 }
 
 export async function loadTeamReview(userId: string): Promise<TeamReviewResult> {
-  const activeTeamId = await loadActiveTeamId(userId);
-  if (!activeTeamId) {
+  const teamId = await loadCurrentTeamId(userId);
+  if (!teamId) {
     return {
-      activeTeamId: null,
+      teamId: null,
       teamName: null,
       items: await loadUserHistory(userId),
       mode: 'worker-history'
     };
   }
 
-  const team = await loadTeam(activeTeamId);
+  const team = await loadTeam(teamId);
   if (!team) {
     return {
-      activeTeamId: null,
+      teamId: null,
       teamName: null,
       items: await loadUserHistory(userId),
       mode: 'worker-history'
@@ -283,17 +283,17 @@ export async function loadTeamReview(userId: string): Promise<TeamReviewResult> 
 
   if (!(await isTeamLeader(team, userId))) {
     return {
-      activeTeamId,
+      teamId,
       teamName: team.name,
-      items: await loadWorkerAssignedWork(userId, activeTeamId),
+      items: await loadWorkerAssignedWork(userId, teamId),
       mode: 'worker-history'
     };
   }
 
   return {
-    activeTeamId,
+    teamId,
     teamName: team.name,
-    items: await loadLeaderInbox(activeTeamId),
+    items: await loadLeaderInbox(teamId),
     mode: 'leader-inbox'
   };
 }

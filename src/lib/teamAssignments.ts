@@ -13,6 +13,19 @@ function firstRow<T>(value: T | T[] | null): T | null {
   return Array.isArray(value) ? value[0] ?? null : value;
 }
 
+function shuffleIndices(length: number): number[] {
+  const indices = Array.from({ length }, (_, index) => index);
+
+  for (let index = indices.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    const current = indices[index];
+    indices[index] = indices[swapIndex];
+    indices[swapIndex] = current;
+  }
+
+  return indices;
+}
+
 export type CreatedTeamAssignmentBatch = {
   batchId: string;
   scanCount: number;
@@ -20,6 +33,11 @@ export type CreatedTeamAssignmentBatch = {
 
 export type ApprovedTeamAssignmentBatch = {
   assignedCount: number;
+};
+
+export type TeamWorkerAllocation = {
+  count: number;
+  userId: string;
 };
 
 export type PendingTeamAssignmentBatchItem = {
@@ -34,6 +52,30 @@ export type PendingTeamAssignmentBatch = {
 };
 
 export type AssignmentState = 'assigned' | 'done' | 'needs_review';
+
+export function buildDefaultWorkerAllocations(
+  workers: Array<{ userId: string }>,
+  totalCount: number
+): TeamWorkerAllocation[] {
+  if (workers.length === 0) {
+    return [];
+  }
+
+  const safeTotalCount = Math.max(0, Math.trunc(totalCount));
+  const baseCount = Math.floor(safeTotalCount / workers.length);
+  const remainder = safeTotalCount % workers.length;
+  const counts = workers.map(() => baseCount);
+  const shuffledIndices = shuffleIndices(workers.length);
+
+  for (let index = 0; index < remainder; index += 1) {
+    counts[shuffledIndices[index]] += 1;
+  }
+
+  return workers.map((worker, index) => ({
+    count: counts[index],
+    userId: worker.userId
+  }));
+}
 
 export async function createTeamAssignmentBatch(
   teamId: string
@@ -98,10 +140,12 @@ export async function loadPendingTeamAssignmentBatch(
 }
 
 export async function approveTeamAssignmentBatch(
-  batchId: string
+  batchId: string,
+  allocations: TeamWorkerAllocation[]
 ): Promise<ApprovedTeamAssignmentBatch> {
   const { data, error } = await supabase.rpc('approve_team_assignment_batch', {
-    target_batch_id: batchId
+    target_batch_id: batchId,
+    worker_allocations: allocations
   });
 
   if (error) {

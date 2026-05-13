@@ -35,7 +35,7 @@ export function AssignedPage({ teamId, userId }: { teamId: string; userId: strin
     <section className="page-stack">
       <div className="page-header">
         <div>
-          <div className="eyebrow">Worker queue</div>
+          <div className="eyebrow">Worker assignments</div>
           <h2>Assigned cards</h2>
         </div>
       </div>

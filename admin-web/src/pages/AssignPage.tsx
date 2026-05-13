@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import {
   addBatchItem,
@@ -13,10 +13,50 @@ import {
 import type { Lead, PendingBatch, TeamMember } from '../lib/types';
 import { EmptyState } from '../components/EmptyState';
 
+type WorkerAllocation = {
+  count: number;
+  userId: string;
+};
+
+function shuffleIndices(length: number): number[] {
+  const indices = Array.from({ length }, (_, index) => index);
+
+  for (let index = indices.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    const current = indices[index];
+    indices[index] = indices[swapIndex];
+    indices[swapIndex] = current;
+  }
+
+  return indices;
+}
+
+function buildDefaultWorkerAllocations(workers: TeamMember[], totalCount: number): WorkerAllocation[] {
+  if (workers.length === 0) {
+    return [];
+  }
+
+  const safeTotalCount = Math.max(0, Math.trunc(totalCount));
+  const baseCount = Math.floor(safeTotalCount / workers.length);
+  const remainder = safeTotalCount % workers.length;
+  const counts = workers.map(() => baseCount);
+  const shuffledIndices = shuffleIndices(workers.length);
+
+  for (let index = 0; index < remainder; index += 1) {
+    counts[shuffledIndices[index]] += 1;
+  }
+
+  return workers.map((worker, index) => ({
+    count: counts[index],
+    userId: worker.userId
+  }));
+}
+
 export function AssignPage({ teamId }: { teamId: string }) {
   const [batch, setBatch] = useState<PendingBatch | null>(null);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [members, setMembers] = useState<TeamMember[]>([]);
+  const [allocations, setAllocations] = useState<WorkerAllocation[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -32,6 +72,9 @@ export function AssignPage({ teamId }: { teamId: string }) {
     setLeads(leadData);
     setMembers(memberData);
   }
+
+  const workerMembers = useMemo(() => members.filter((member) => !member.isLeader), [members]);
+  const workerMemberIds = useMemo(() => workerMembers.map((member) => member.userId).join(','), [workerMembers]);
 
   useEffect(() => {
     let active = true;
@@ -51,9 +94,21 @@ export function AssignPage({ teamId }: { teamId: string }) {
 
   const assignedIds = new Set(batch?.items.map((item) => item.scannedLeadId));
   const leadById = new Map(leads.map((lead) => [lead.id, lead]));
-  const workerMembers = members.filter((member) => !member.isLeader);
   const unassignedLeads = leads.filter((lead) => !lead.assignedToUserId);
   const assignedLeads = leads.filter((lead) => lead.assignedToUserId);
+  const batchSize = batch?.items.length ?? 0;
+  const allocationTotal = allocations.reduce((sum, allocation) => sum + allocation.count, 0);
+  const canApproveBatch = batchSize > 0 && workerMembers.length > 0 && allocationTotal === batchSize;
+  const allocationResetKey = `${batch?.batchId ?? ''}:${batchSize}:${workerMemberIds}`;
+
+  useEffect(() => {
+    if (batchSize === 0 || workerMembers.length === 0) {
+      setAllocations([]);
+      return;
+    }
+
+    setAllocations(buildDefaultWorkerAllocations(workerMembers, batchSize));
+  }, [allocationResetKey, workerMembers, batchSize]);
 
   return (
     <section className="page-stack">
@@ -96,6 +151,52 @@ export function AssignPage({ teamId }: { teamId: string }) {
           </div>
           {batch ? (
             <>
+              <div className="stack">
+                <div className="card-top">
+                  <strong>Worker allocations</strong>
+                  <span>
+                    {allocationTotal}/{batch.items.length}
+                  </span>
+                </div>
+                {workerMembers.length === 0 ? (
+                  <EmptyState title="No workers yet">Add at least one worker before approving assignments.</EmptyState>
+                ) : (
+                  <div className="list compact">
+                    {workerMembers.map((member) => {
+                      const allocation = allocations.find((entry) => entry.userId === member.userId);
+
+                      return (
+                        <div className="mini-row" key={member.userId}>
+                          <span>{member.email}</span>
+                          <input
+                            aria-label={`Cards for ${member.email}`}
+                            min={0}
+                            type="number"
+                            value={allocation?.count ?? 0}
+                            onChange={(event) => {
+                              const nextCount = Number.parseInt(event.target.value, 10);
+                              const normalizedCount = Number.isNaN(nextCount) ? 0 : Math.max(0, nextCount);
+                              setAllocations((currentAllocations) => {
+                                const nextAllocations = currentAllocations.map((entry) =>
+                                  entry.userId === member.userId
+                                    ? { ...entry, count: normalizedCount }
+                                    : entry
+                                );
+
+                                if (nextAllocations.some((entry) => entry.userId === member.userId)) {
+                                  return nextAllocations;
+                                }
+
+                                return [...nextAllocations, { userId: member.userId, count: normalizedCount }];
+                              });
+                            }}
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
               <div className="list compact">
                 {batch.items.map((item) => (
                   <div className="mini-row" key={item.scannedLeadId}>
@@ -124,7 +225,7 @@ export function AssignPage({ teamId }: { teamId: string }) {
               </div>
               <button
                 className="primary-button"
-                disabled={busy || batch.items.length === 0 || workerMembers.length === 0}
+                disabled={busy || !canApproveBatch}
                 onClick={async () => {
                   setBusy(true);
                   setError(null);
@@ -133,7 +234,21 @@ export function AssignPage({ teamId }: { teamId: string }) {
                       setError('Add at least one worker before approving assignments.');
                       return;
                     }
-                    const count = await approveBatch(batch.batchId);
+
+                    if (!batch) {
+                      setError('No pending batch is available.');
+                      return;
+                    }
+
+                    if (allocationTotal !== batch.items.length) {
+                      setError('Worker counts must total the selected batch size before approval.');
+                      return;
+                    }
+
+                    const count = await approveBatch(
+                      batch.batchId,
+                      allocations
+                    );
                     await refresh();
                     setNotice(`Approved ${count} assignments`);
                   } catch (err) {
