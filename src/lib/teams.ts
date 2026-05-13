@@ -7,13 +7,6 @@ export type AccessibleTeam = {
   name: string;
 };
 
-type TeamInsertRow = {
-  created_at: string;
-  created_by: string;
-  id: string;
-  name: string;
-};
-
 type TeamRow = {
   created_at: string;
   created_by: string;
@@ -49,19 +42,9 @@ export async function createTeam(name: string): Promise<AccessibleTeam> {
     throw new Error('Team name is required');
   }
 
-  const { data: userData, error: userError } = await supabase.auth.getUser();
-  if (userError || !userData.user) {
-    throw new Error('Authenticated user required for team creation');
-  }
-
-  const { data, error } = await supabase
-    .from('teams')
-    .insert({
-      created_by: userData.user.id,
-      name: trimmedName
-    })
-    .select('id, name, created_by, created_at')
-    .single();
+  const { data, error } = await supabase.rpc('create_team', {
+    team_name: trimmedName
+  });
 
   if (error) {
     throw new Error(error.message);
@@ -71,32 +54,5 @@ export async function createTeam(name: string): Promise<AccessibleTeam> {
     throw new Error('Team creation returned no row');
   }
 
-  const team = mapTeamRow(data as TeamInsertRow);
-
-  const { error: membershipError } = await supabase.from('team_memberships').insert({
-    team_id: team.id,
-    user_id: userData.user.id
-  });
-
-  if (membershipError) {
-    throw new Error(membershipError.message);
-  }
-
-  const { error: contextError } = await supabase
-    .from('user_team_contexts')
-    .upsert(
-      {
-        team_id: team.id,
-        user_id: userData.user.id
-      },
-      {
-        onConflict: 'user_id'
-      }
-    );
-
-  if (contextError) {
-    throw new Error(contextError.message);
-  }
-
-  return team;
+  return mapTeamRow(data as TeamRow);
 }

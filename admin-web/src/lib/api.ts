@@ -104,23 +104,13 @@ export async function createTeam(name: string): Promise<AccessibleTeam> {
   const trimmedName = name.trim();
   if (!trimmedName) throw new Error('Team name is required');
 
-  const { data: userData, error: userError } = await supabase.auth.getUser();
-  if (userError || !userData.user) throw new Error('Authenticated user required');
-
-  const { data, error } = await supabase
-    .from('teams')
-    .insert({ created_by: userData.user.id, name: trimmedName })
-    .select('id, name, created_by, created_at')
-    .single();
+  const { data, error } = await supabase.rpc('create_team', {
+    team_name: trimmedName
+  });
   if (error) throw new Error(error.message);
+  if (!data) throw new Error('Team creation returned no row');
 
   const team = mapTeam(data as TeamRow);
-  const { error: membershipError } = await supabase
-    .from('team_memberships')
-    .insert({ team_id: team.id, user_id: userData.user.id });
-  if (membershipError) throw new Error(membershipError.message);
-
-  await setActiveTeamId(team.id);
   return team;
 }
 
