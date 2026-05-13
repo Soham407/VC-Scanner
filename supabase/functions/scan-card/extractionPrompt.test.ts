@@ -8,7 +8,7 @@ import {
 Deno.test("buildCardExtractionRequest: includes image and OCR text", () => {
   const request = buildCardExtractionRequest({
     rawText: "Savemax\nPrabhat A Deshpande\nManufacturing Unit & Corporate Office",
-    imageDataUrl: "data:image/jpeg;base64,abc123",
+    imageDataUrls: ["data:image/jpeg;base64,abc123"],
   });
 
   assertEquals(request.model, CARD_EXTRACTION_MODEL);
@@ -28,6 +28,12 @@ Deno.test("buildCardExtractionRequest: includes image and OCR text", () => {
 
 Deno.test("buildCardExtractionRequest: prompt separates company from address", () => {
   assertStringIncludes(CARD_EXTRACTION_SYSTEM_PROMPT, "companyName");
+  assertStringIncludes(CARD_EXTRACTION_SYSTEM_PROMPT, "productServices");
+  assertStringIncludes(CARD_EXTRACTION_SYSTEM_PROMPT, "what the business sells or provides");
   assertStringIncludes(CARD_EXTRACTION_SYSTEM_PROMPT, "address");
   assertStringIncludes(CARD_EXTRACTION_SYSTEM_PROMPT, "Corporate Office");
+  assertStringIncludes(CARD_EXTRACTION_SYSTEM_PROMPT, "Treat OCR text as noisy");
+  assertStringIncludes(CARD_EXTRACTION_SYSTEM_PROMPT, "fullName is the person");
+  assertStringIncludes(CARD_EXTRACTION_SYSTEM_PROMPT, "Owner");
+  assertStringIncludes(CARD_EXTRACTION_SYSTEM_PROMPT, "double-sided");
 });

@@ -18,7 +18,12 @@ jest.mock('../../src/lib/supabase', () => ({
   }
 }));
 
-import { createScannerQueueStore } from '../../store/scanner';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  createScannerQueueStore,
+  scannerQueueStore,
+  syncScannerQueueStoreNamespace
+} from '../../store/scanner';
 
 function createTestStore(overrides: Parameters<typeof createScannerQueueStore>[0] = {}) {
   return createScannerQueueStore(overrides, {
@@ -28,9 +33,18 @@ function createTestStore(overrides: Parameters<typeof createScannerQueueStore>[0
 }
 
 describe('scanner queue store', () => {
+  beforeEach(async () => {
+    await AsyncStorage.clear();
+    await syncScannerQueueStoreNamespace(null);
+  });
+
   afterEach(() => {
     jest.restoreAllMocks();
   });
+
+  async function flushPersistedState(): Promise<void> {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
 
   it('enqueue adds an uploading item', () => {
     const store = createTestStore();
@@ -48,6 +62,44 @@ describe('scanner queue store', () => {
         imagePath: 'file:///cache/lead-lead-1.jpg',
         rawText: 'John Doe\nAcme Corp',
         retryCount: 0
+      }
+    ]);
+  });
+
+  it('keeps persisted queue and history isolated by signed-in user namespace', async () => {
+    await syncScannerQueueStoreNamespace('user-1');
+    scannerQueueStore.getState().enqueue({
+      id: 'lead-user-1',
+      imagePath: 'file:///cache/lead-user-1.jpg',
+      rawText: 'User one'
+    });
+    await flushPersistedState();
+
+    await syncScannerQueueStoreNamespace('user-2');
+    expect(scannerQueueStore.getState().queue).toEqual([]);
+
+    scannerQueueStore.getState().enqueue({
+      id: 'lead-user-2',
+      imagePath: 'file:///cache/lead-user-2.jpg',
+      rawText: 'User two'
+    });
+    await flushPersistedState();
+
+    await syncScannerQueueStoreNamespace('user-1');
+    expect(scannerQueueStore.getState().queue).toMatchObject([
+      {
+        id: 'lead-user-1',
+        rawText: 'User one',
+        status: 'uploading'
+      }
+    ]);
+
+    await syncScannerQueueStoreNamespace('user-2');
+    expect(scannerQueueStore.getState().queue).toMatchObject([
+      {
+        id: 'lead-user-2',
+        rawText: 'User two',
+        status: 'uploading'
       }
     ]);
   });

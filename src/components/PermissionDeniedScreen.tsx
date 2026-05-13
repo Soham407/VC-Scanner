@@ -1,8 +1,8 @@
 import { JSX } from 'react';
 import { Linking, StyleSheet, View } from 'react-native';
 import { Button, Surface, Text } from '../design/openDesign';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
 
+import { AppLogo } from './AppLogo';
 import { useAppTheme } from '../theme/materialTheme';
 
 export function PermissionDeniedScreen(): JSX.Element {
@@ -15,8 +15,8 @@ export function PermissionDeniedScreen(): JSX.Element {
   return (
     <Surface style={[styles.container, { backgroundColor: theme.colors.background }]}>
       <Surface elevation={2} style={[styles.card, { backgroundColor: theme.colors.surfaceContainerHigh }]}>
-        <View style={[styles.iconWrap, { backgroundColor: theme.colors.primaryContainer }]}>
-          <MaterialCommunityIcons color={theme.colors.onPrimaryContainer} name="camera-off" size={28} />
+        <View style={styles.header}>
+          <AppLogo compact size={60} variant="mark" />
         </View>
         <Text style={styles.title} variant="headlineSmall">
           Camera permission needed
@@ -61,17 +61,13 @@ const styles = StyleSheet.create({
     padding: 20,
     width: '100%'
   },
+  header: {
+    alignItems: 'center',
+    marginBottom: 16
+  },
   hintList: {
     gap: 4,
     marginBottom: 24
-  },
-  iconWrap: {
-    alignItems: 'center',
-    borderRadius: 8,
-    height: 60,
-    justifyContent: 'center',
-    marginBottom: 16,
-    width: 60
   },
   title: {
     marginBottom: 12,

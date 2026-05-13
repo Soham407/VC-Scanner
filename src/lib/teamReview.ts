@@ -2,6 +2,7 @@ import { supabase } from './supabase';
 import type { AssignmentState } from './teamAssignments';
 
 export type TeamReviewItem = {
+  address: string | null;
   assignedToUserId: string | null;
   teamId: string | null;
   assignedAt: string | null;
@@ -16,6 +17,7 @@ export type TeamReviewItem = {
   jobTitle: string | null;
   parseStatus: 'parsed' | 'unparsed';
   phoneNumber: string | null;
+  productServices: string | null;
   rawText: string;
 };
 
@@ -41,6 +43,7 @@ type TeamLeaderRow = {
 };
 
 type ScannedLeadRow = {
+  address: string | null;
   team_id: string | null;
   company_name: string | null;
   created_at: string;
@@ -51,6 +54,7 @@ type ScannedLeadRow = {
   job_title: string | null;
   parse_status: 'parsed' | 'unparsed';
   phone_number: string | null;
+  product_services: string | null;
   raw_ocr_text: string;
   user_id: string;
 };
@@ -66,9 +70,11 @@ const LEAD_SELECT_FIELDS = [
   'id',
   'team_id',
   'user_id',
+  'address',
   'full_name',
   'job_title',
   'company_name',
+  'product_services',
   'email',
   'phone_number',
   'image_url',
@@ -79,22 +85,59 @@ const LEAD_SELECT_FIELDS = [
 
 function mapLeadRow(row: ScannedLeadRow): TeamReviewItem {
   return {
+    address: row.address ?? null,
     assignedToUserId: null,
     teamId: row.team_id,
     assignedAt: null,
     assignmentState: null,
     capturedByUserId: row.user_id,
-    companyName: row.company_name,
+    companyName: row.company_name ?? null,
     createdAt: row.created_at,
-    email: row.email,
-    fullName: row.full_name,
+    email: row.email ?? null,
+    fullName: row.full_name ?? null,
     id: row.id,
-    imagePath: row.image_url,
-    jobTitle: row.job_title,
+    imagePath: row.image_url ?? null,
+    jobTitle: row.job_title ?? null,
     parseStatus: row.parse_status,
-    phoneNumber: row.phone_number,
+    phoneNumber: row.phone_number ?? null,
+    productServices: row.product_services ?? null,
     rawText: row.raw_ocr_text
   };
+}
+
+export type ScannedLeadDetailsUpdate = {
+  address: string | null;
+  companyName: string | null;
+  email: string | null;
+  fullName: string | null;
+  jobTitle: string | null;
+  phoneNumber: string | null;
+  productServices: string | null;
+};
+
+function normalizeEditableValue(value: string | null): string | null {
+  const trimmed = value?.trim() ?? '';
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+export async function updateScannedLeadDetails(
+  scannedLeadId: string,
+  updates: ScannedLeadDetailsUpdate
+): Promise<void> {
+  const { error } = await supabase.rpc('update_scanned_lead_details', {
+    target_scanned_lead_id: scannedLeadId,
+    target_address: normalizeEditableValue(updates.address),
+    target_company_name: normalizeEditableValue(updates.companyName),
+    target_email: normalizeEditableValue(updates.email),
+    target_full_name: normalizeEditableValue(updates.fullName),
+    target_job_title: normalizeEditableValue(updates.jobTitle),
+    target_phone_number: normalizeEditableValue(updates.phoneNumber),
+    target_product_services: normalizeEditableValue(updates.productServices)
+  });
+
+  if (error) {
+    throw error;
+  }
 }
 
 async function loadUserHistory(userId: string): Promise<TeamReviewItem[]> {
@@ -129,6 +172,7 @@ async function loadWorkerAssignedWork(userId: string, activeTeamId: string): Pro
         ? {
             ...mapLeadRow(lead),
             assignedAt: row.assigned_at,
+            assignedToUserId: row.assigned_to_user_id,
             assignmentState: row.assignment_state
           }
         : null;
@@ -230,7 +274,7 @@ export async function loadTeamReview(userId: string): Promise<TeamReviewResult> 
   const team = await loadTeam(activeTeamId);
   if (!team) {
     return {
-      activeTeamId,
+      activeTeamId: null,
       teamName: null,
       items: await loadUserHistory(userId),
       mode: 'worker-history'

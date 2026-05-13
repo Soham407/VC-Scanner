@@ -1,17 +1,20 @@
 import { BottomSheetModal, BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import * as NetInfo from '@react-native-community/netinfo';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import * as FileSystem from 'expo-file-system/legacy';
 import { launchImageLibraryAsync } from 'expo-image-picker';
 import { StatusBar } from 'expo-status-bar';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { type ComponentProps, useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, {
   FadeIn,
   FadeInDown,
   FadeInUp,
   FadeOut,
   LinearTransition,
+  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
@@ -21,6 +24,7 @@ import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-
 import {
   Button,
   Card,
+  Chip,
   FAB,
   IconButton,
   List,
@@ -34,10 +38,12 @@ import type { Session } from '@supabase/supabase-js';
 import { AuthScreen } from './src/components/AuthScreen';
 import { BlurryImageError, extractText } from './lib/ocr';
 import { type TeamInboxItem } from './src/lib/teamInbox';
+import { updateScannedLeadDetails } from './src/lib/teamReview';
 import { type AccessibleTeam } from './src/lib/teams';
 import { type TeamWorkspaceState, useTeamWorkspace } from './src/hooks/useTeamWorkspace';
 import type { TeamMember } from './src/lib/teamMembers';
 import { CaptureButton } from './src/components/CaptureButton';
+import { AppLogo } from './src/components/AppLogo';
 import { CornerPill } from './src/components/CornerPill';
 import { MotionBottomNav } from './src/components/MotionBottomNav';
 import { PageTransitionWrapper } from './src/components/PageTransitionWrapper';
@@ -50,7 +56,9 @@ import { TeamAssignmentBatchSheet } from './src/components/TeamAssignmentBatchSh
 import { TeamReassignSheet } from './src/components/TeamReassignSheet';
 import { StatusChip, type OcrStatus } from './src/components/StatusChip';
 import { prepareImage } from './src/lib/imagePrep';
+import { parseCardPreview, saveParsedCard, type ParsedCard, type ParseStatus } from './src/lib/scanCard';
 import { supabase } from './src/lib/supabase';
+import { uploadCardImage } from './src/lib/upload';
 import { MaterialThemeProvider, useAppTheme, useMaterialThemeControls } from './src/theme/materialTheme';
 import { motion } from './src/theme/motion';
 import {
@@ -64,13 +72,54 @@ import {
 type AppTab = 'dashboard' | 'history' | 'team' | 'profile';
 type HistoryFilter = 'all' | 'saved' | 'needs-review' | 'unassigned' | 'assigned' | 'done';
 type HistoryMode = 'leader-inbox' | 'worker-history';
+type CardCaptureMode = 'singleSided' | 'doubleSided';
+type CardSide = 'front' | 'back';
 
 type PendingScanReview = {
   cachePath: string;
+  cachePaths: string[];
   leadId: string;
+  parsed: ParsedCard;
+  parseStatus: ParseStatus;
   rawText: string;
+  storagePath: string;
+  storagePaths: string[];
   teamId: string | null;
 };
+
+type CapturedCardSide = {
+  cachePath: string;
+  rawText: string;
+  side: CardSide;
+  storagePath: string;
+};
+
+type ParsedCardField = keyof ParsedCard;
+type ParsedReviewTarget = ParsedCardField | 'extraText';
+
+type ParsedReviewBlock = {
+  id: string;
+  assignedField: ParsedReviewTarget;
+  source: 'ocr' | 'parsed';
+  text: string;
+};
+
+const REVIEW_SAVE_TIMEOUT_MS = 20000;
+
+const parsedCardFields: Array<{
+  key: ParsedCardField;
+  label: string;
+  keyboardType?: ComponentProps<typeof TextInput>['keyboardType'];
+  multiline?: boolean;
+}> = [
+  { key: 'fullName', label: 'Name' },
+  { key: 'jobTitle', label: 'Role' },
+  { key: 'companyName', label: 'Company' },
+  { key: 'productServices', label: 'Product/Services', multiline: true },
+  { key: 'email', label: 'Email', keyboardType: 'email-address' },
+  { key: 'phoneNumber', label: 'Phone', keyboardType: 'phone-pad' },
+  { key: 'address', label: 'Address', multiline: true }
+];
 
 function getTeamInboxItemTitle(item: TeamInboxItem): string {
   return item.fullName ?? item.companyName ?? item.rawText.split('\n')[0] ?? 'Untitled scan';
@@ -98,6 +147,206 @@ function getAssignmentLabel(item: TeamInboxItem): string {
 
 function getMemberLabel(memberLabel: string | undefined | null): string {
   return memberLabel ?? 'Team member';
+}
+
+function scannerHistoryToInboxItem(item: ScannerHistoryItem, userId: string): TeamInboxItem {
+  return {
+    address: item.parsed.address,
+    assignedAt: null,
+    assignedToUserId: null,
+    assignmentState: null,
+    capturedByUserId: userId,
+    companyName: item.parsed.companyName,
+    createdAt: new Date(item.savedAt).toISOString(),
+    email: item.parsed.email,
+    fullName: item.parsed.fullName,
+    id: item.id,
+    imagePath: item.imagePath,
+    jobTitle: item.parsed.jobTitle,
+    parseStatus: item.parseStatus,
+    phoneNumber: item.parsed.phoneNumber,
+    productServices: item.parsed.productServices,
+    rawText: item.rawText,
+    teamId: null
+  };
+}
+
+function normalizeReviewText(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9@.+]/g, '');
+}
+
+function splitReviewLines(value: string | null): string[] {
+  return (value ?? '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}
+
+function removeReviewBlockFromValue(value: string, blockText: string): string {
+  const target = normalizeReviewText(blockText);
+  return splitReviewLines(value)
+    .filter((line) => normalizeReviewText(line) !== target)
+    .join('\n');
+}
+
+function appendReviewBlockToValue(value: string, blockText: string): string {
+  const trimmedBlock = blockText.trim();
+  if (!trimmedBlock) {
+    return value;
+  }
+
+  const currentLines = splitReviewLines(value);
+  const target = normalizeReviewText(trimmedBlock);
+  if (currentLines.some((line) => normalizeReviewText(line) === target)) {
+    return currentLines.join('\n');
+  }
+
+  return [...currentLines, trimmedBlock].join('\n');
+}
+
+function parsedCardToEditableValues(parsed: ParsedCard): Record<ParsedCardField, string> {
+  return {
+    address: parsed.address ?? '',
+    companyName: parsed.companyName ?? '',
+    email: parsed.email ?? '',
+    fullName: parsed.fullName ?? '',
+    jobTitle: parsed.jobTitle ?? '',
+    phoneNumber: parsed.phoneNumber ?? '',
+    productServices: parsed.productServices ?? ''
+  };
+}
+
+function editableValuesToParsedCard(values: Record<ParsedCardField, string>): ParsedCard {
+  const normalize = (value: string): string | null => {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  };
+
+  return {
+    address: normalize(values.address),
+    companyName: normalize(values.companyName),
+    email: normalize(values.email),
+    fullName: normalize(values.fullName),
+    jobTitle: normalize(values.jobTitle),
+    phoneNumber: normalize(values.phoneNumber),
+    productServices: normalize(values.productServices)
+  };
+}
+
+function getLocalParseStatus(parsed: ParsedCard): ParseStatus {
+  return Object.values(parsed).some((value) => value !== null) ? 'parsed' : 'unparsed';
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+
+    promise
+      .then((value) => {
+        clearTimeout(timeoutId);
+        resolve(value);
+      })
+      .catch((error: unknown) => {
+        clearTimeout(timeoutId);
+        reject(error);
+      });
+  });
+}
+
+function createParsedReviewBlocks(rawText: string, parsed: ParsedCard): ParsedReviewBlock[] {
+  const blocks: ParsedReviewBlock[] = [];
+  const representedValues: string[] = [];
+
+  parsedCardFields.forEach((field) => {
+    splitReviewLines(parsed[field.key]).forEach((line, lineIndex) => {
+      representedValues.push(normalizeReviewText(line));
+      blocks.push({
+        assignedField: field.key,
+        id: `parsed-${field.key}-${lineIndex}`,
+        source: 'parsed',
+        text: line
+      });
+    });
+  });
+
+  const seenExtraValues = new Set<string>();
+  splitReviewLines(rawText).forEach((line, lineIndex) => {
+    const normalized = normalizeReviewText(line);
+    if (!normalized || representedValues.some((value) => value.includes(normalized) || normalized.includes(value))) {
+      return;
+    }
+
+    if (seenExtraValues.has(normalized)) {
+      return;
+    }
+
+    seenExtraValues.add(normalized);
+    blocks.push({
+      assignedField: 'extraText',
+      id: `ocr-extra-${lineIndex}`,
+      source: 'ocr',
+      text: line
+    });
+  });
+
+  return blocks;
+}
+
+function formatCardSideRawText(sides: CapturedCardSide[]): string {
+  return sides
+    .map((side) => `${side.side === 'front' ? 'Front side' : 'Back side'} OCR:\n${side.rawText}`)
+    .join('\n\n');
+}
+
+async function archiveReviewedImage(cachePath: string, leadId: string): Promise<string> {
+  if (!FileSystem.documentDirectory) {
+    return cachePath;
+  }
+
+  const historyDirectory = `${FileSystem.documentDirectory}history/`;
+  await FileSystem.makeDirectoryAsync(historyDirectory, { intermediates: true });
+
+  const archivedPath = `${historyDirectory}lead-${leadId}.jpg`;
+  await FileSystem.deleteAsync(archivedPath, { idempotent: true });
+  await FileSystem.copyAsync({
+    from: cachePath,
+    to: archivedPath
+  });
+
+  return archivedPath;
+}
+
+async function updateExistingReviewedLead(leadId: string, parsed: ParsedCard): Promise<void> {
+  try {
+    await updateScannedLeadDetails(leadId, {
+      address: parsed.address,
+      companyName: parsed.companyName,
+      email: parsed.email,
+      fullName: parsed.fullName,
+      jobTitle: parsed.jobTitle,
+      phoneNumber: parsed.phoneNumber,
+      productServices: parsed.productServices
+    });
+    return;
+  } catch {
+    const { error } = await supabase
+      .from('scanned_leads')
+      .update({
+        address: parsed.address,
+        company_name: parsed.companyName,
+        email: parsed.email,
+        full_name: parsed.fullName,
+        job_title: parsed.jobTitle,
+        parse_status: getLocalParseStatus(parsed),
+        phone_number: parsed.phoneNumber,
+        product_services: parsed.productServices
+      })
+      .eq('id', leadId);
+
+    if (error) {
+      throw error;
+    }
+  }
 }
 
 const routes: Array<{
@@ -143,8 +392,44 @@ function getOAuthCodeFromUrl(url: string): string | null {
   }
 }
 
+function getOAuthCallbackParams(url: string): URLSearchParams {
+  try {
+    const parsed = new URL(url);
+    const params = new URLSearchParams(parsed.search);
+
+    if (parsed.hash.startsWith('#')) {
+      const hashParams = new URLSearchParams(parsed.hash.slice(1));
+      hashParams.forEach((value, key) => {
+        if (!params.has(key)) {
+          params.set(key, value);
+        }
+      });
+    }
+
+    return params;
+  } catch {
+    const [, afterQuestionMark = ''] = url.split('?');
+    const [, hashFromUrl = ''] = url.split('#');
+    const [queryPart = '', hashFromQuery = ''] = afterQuestionMark.split('#');
+    const hashPart = hashFromQuery || hashFromUrl;
+    const params = new URLSearchParams(queryPart);
+
+    if (hashPart) {
+      const hashParams = new URLSearchParams(hashPart);
+      hashParams.forEach((value, key) => {
+        if (!params.has(key)) {
+          params.set(key, value);
+        }
+      });
+    }
+
+    return params;
+  }
+}
+
 function DashboardScreen({
   activeTeamName,
+  hasTeamWorkspace,
   history,
   inFlightCount,
   failedCount,
@@ -153,6 +438,7 @@ function DashboardScreen({
   status
 }: {
   activeTeamName: string | null;
+  hasTeamWorkspace: boolean;
   failedCount: number;
   history: ScannerHistoryItem[];
   inFlightCount: number;
@@ -167,6 +453,7 @@ function DashboardScreen({
       <Animated.View entering={FadeInUp.duration(motion.duration.medium2).easing(motion.easing.emphasized)}>
         <ScanHeroCard
           activeTeamName={activeTeamName}
+          hasTeamWorkspace={hasTeamWorkspace}
           onOpenCamera={onOpenCamera}
           onOpenHistory={onOpenHistory}
           failedCount={failedCount}
@@ -206,6 +493,7 @@ function HistoryScreen({
   teamName,
   isBatchActionLoading,
   isLoading,
+  isPersonalHistory,
   items,
   mode,
   onApproveBatch,
@@ -223,6 +511,7 @@ function HistoryScreen({
   teamName: string | null;
   isBatchActionLoading: boolean;
   isLoading: boolean;
+  isPersonalHistory: boolean;
   items: TeamInboxItem[];
   mode: HistoryMode;
   onApproveBatch: () => void;
@@ -272,10 +561,12 @@ function HistoryScreen({
 
     return true;
   });
-  const title = mode === 'leader-inbox' ? 'Team Inbox' : 'Assignments';
+  const title = mode === 'leader-inbox' ? 'Team Inbox' : isPersonalHistory ? 'History' : 'Assignments';
   const subtitle = mode === 'leader-inbox'
     ? 'Review new cards, choose who should handle them, and keep the team moving.'
-    : 'Cards assigned to you appear here.';
+    : isPersonalHistory
+      ? 'Every card saved by your account appears here.'
+      : 'Cards assigned to you appear here.';
   const availableFilters = mode === 'leader-inbox'
     ? [
         { count: items.length, label: 'All', value: 'all' as const },
@@ -299,7 +590,7 @@ function HistoryScreen({
         >
           <View style={styles.historyHeroCopy}>
             <Text style={styles.screenKicker} variant="labelSmall">
-              {mode === 'leader-inbox' ? 'Team lead' : 'My work'}
+              {mode === 'leader-inbox' ? 'Team lead' : isPersonalHistory ? 'My scans' : 'My work'}
             </Text>
             <Text variant="headlineMedium">{title}</Text>
             <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }} variant="bodyMedium">
@@ -314,7 +605,7 @@ function HistoryScreen({
           <View style={styles.historyHeroActions}>
             <View style={[styles.historyHeroBadge, { backgroundColor: theme.colors.surfaceContainerHighest }]}>
               <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelSmall">
-                {mode === 'leader-inbox' ? 'Lead view' : 'My view'}
+                {mode === 'leader-inbox' ? 'Lead view' : isPersonalHistory ? 'Personal' : 'My view'}
               </Text>
             </View>
             <Button icon="camera" mode="contained" onPress={onOpenCamera} testID="history-empty-scan-button">
@@ -416,7 +707,9 @@ function HistoryScreen({
                 {items.length === 0
                   ? mode === 'leader-inbox'
                     ? 'Team scans will appear here as your team captures cards.'
-                    : 'Cards will appear here after your team lead assigns them.'
+                    : isPersonalHistory
+                      ? 'Your saved scans will appear here.'
+                      : 'Cards will appear here after your team lead assigns them.'
                   : 'Try another filter to see more cards.'}
               </Text>
               <Button icon="camera" mode="contained" onPress={onOpenCamera}>
@@ -448,15 +741,17 @@ function HistoryScreen({
                     </Text>
                     <View style={styles.historyMetaRow}>
                       <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelSmall">
-                        {getAssignmentLabel(item)}
+                        {isPersonalHistory ? 'Saved scan' : getAssignmentLabel(item)}
                       </Text>
-                      <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelSmall">
-                        {mode === 'worker-history'
-                          ? 'Assigned to you'
-                          : item.assignmentState && item.assignedToUserId
-                          ? `Assigned to ${getMemberLabel(memberLabelById.get(item.assignedToUserId))}`
-                          : 'Waiting for assignment'}
-                      </Text>
+                      {!isPersonalHistory ? (
+                        <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelSmall">
+                          {mode === 'worker-history'
+                            ? 'Assigned to you'
+                            : item.assignmentState && item.assignedToUserId
+                            ? `Assigned to ${getMemberLabel(memberLabelById.get(item.assignedToUserId))}`
+                            : 'Waiting for assignment'}
+                        </Text>
+                      ) : null}
                     </View>
                     {mode === 'leader-inbox' && item.assignmentState ? (
                       <View style={styles.assignmentActions}>
@@ -465,7 +760,7 @@ function HistoryScreen({
                         </Button>
                       </View>
                     ) : null}
-                    {mode === 'worker-history' && item.assignmentState ? (
+                    {!isPersonalHistory && mode === 'worker-history' && item.assignmentState ? (
                       <View style={styles.assignmentActions}>
                         <Button
                           compact
@@ -505,21 +800,69 @@ function HistoryScreen({
 
 function AssignmentDetailScreen({
   item,
+  isPersonalHistory,
   memberLabel,
   mode,
   onBack,
   onOpenReassignAssignment,
+  onUpdateLeadDetails,
   onUpdateAssignmentState
 }: {
   item: TeamInboxItem;
+  isPersonalHistory: boolean;
   memberLabel: string | null;
   mode: HistoryMode;
   onBack: () => void;
   onOpenReassignAssignment: (item: TeamInboxItem) => void;
+  onUpdateLeadDetails: TeamWorkspaceState['updateLeadDetails'];
   onUpdateAssignmentState: (scannedLeadId: string, assignmentState: 'done' | 'needs_review') => Promise<void>;
 }) {
   const theme = useAppTheme();
   const [confirmNeedsReview, setConfirmNeedsReview] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [isSavingDetails, setIsSavingDetails] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [editValues, setEditValues] = useState({
+    address: item.address ?? '',
+    companyName: item.companyName ?? '',
+    email: item.email ?? '',
+    fullName: item.fullName ?? '',
+    jobTitle: item.jobTitle ?? '',
+    phoneNumber: item.phoneNumber ?? '',
+    productServices: item.productServices ?? ''
+  });
+
+  const updateEditValue = useCallback((field: keyof typeof editValues, value: string) => {
+    setEditValues((current) => ({
+      ...current,
+      [field]: value
+    }));
+    setEditError(null);
+  }, []);
+
+  const saveLeadDetails = useCallback(() => {
+    setIsSavingDetails(true);
+    setEditError(null);
+
+    void onUpdateLeadDetails(item.id, {
+      address: editValues.address,
+      companyName: editValues.companyName,
+      email: editValues.email,
+      fullName: editValues.fullName,
+      jobTitle: editValues.jobTitle,
+      phoneNumber: editValues.phoneNumber,
+      productServices: editValues.productServices
+    })
+      .then(() => {
+        setIsEditing(false);
+        onBack();
+      })
+      .catch((error: unknown) => {
+        console.warn('Lead details update failed', error);
+        setEditError('Could not save changes. Please try again.');
+      })
+      .finally(() => setIsSavingDetails(false));
+  }, [editValues, item.id, onBack, onUpdateLeadDetails]);
 
   if (confirmNeedsReview) {
     return (
@@ -567,12 +910,12 @@ function AssignmentDetailScreen({
           </Button>
           <View style={[styles.historyHeroBadge, { backgroundColor: theme.colors.surfaceContainerHighest }]}>
             <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelSmall">
-              {item.assignmentState ? 'Assigned card' : 'Team inbox'}
+              {isPersonalHistory ? 'Personal scan' : item.assignmentState ? 'Assigned card' : 'Team inbox'}
             </Text>
           </View>
         </View>
         <Text style={styles.screenKicker} variant="labelSmall">
-          {item.assignmentState ? 'Assigned card' : 'New card'}
+          {isPersonalHistory ? 'Saved card' : item.assignmentState ? 'Assigned card' : 'New card'}
         </Text>
         <Text variant="headlineSmall">{getTeamInboxItemTitle(item)}</Text>
         <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
@@ -581,21 +924,120 @@ function AssignmentDetailScreen({
       </Surface>
 
       <Surface elevation={1} style={[styles.detailPanel, { backgroundColor: theme.colors.surfaceContainer }]}>
-        <DetailField label="Name" value={item.fullName ?? 'Not found'} />
-        <DetailField label="Role" value={item.jobTitle ?? 'Not found'} />
-        <DetailField label="Company" value={item.companyName ?? 'Not found'} />
-        <DetailField label="Email" value={item.email ?? 'Not found'} />
-        <DetailField label="Phone" value={item.phoneNumber ?? 'Not found'} />
+        {isEditing ? (
+          <>
+            <EditableDetailField
+              label="Name"
+              onChangeText={(value) => updateEditValue('fullName', value)}
+              testID="edit-lead-full-name-input"
+              value={editValues.fullName}
+            />
+            <EditableDetailField
+              label="Role"
+              onChangeText={(value) => updateEditValue('jobTitle', value)}
+              testID="edit-lead-job-title-input"
+              value={editValues.jobTitle}
+            />
+            <EditableDetailField
+              label="Company"
+              onChangeText={(value) => updateEditValue('companyName', value)}
+              testID="edit-lead-company-name-input"
+              value={editValues.companyName}
+            />
+            <EditableDetailField
+              label="Product/Services"
+              multiline
+              onChangeText={(value) => updateEditValue('productServices', value)}
+              testID="edit-lead-product-services-input"
+              value={editValues.productServices}
+            />
+            <EditableDetailField
+              autoCapitalize="none"
+              keyboardType="email-address"
+              label="Email"
+              onChangeText={(value) => updateEditValue('email', value)}
+              testID="edit-lead-email-input"
+              value={editValues.email}
+            />
+            <EditableDetailField
+              keyboardType="phone-pad"
+              label="Phone"
+              onChangeText={(value) => updateEditValue('phoneNumber', value)}
+              testID="edit-lead-phone-input"
+              value={editValues.phoneNumber}
+            />
+            <EditableDetailField
+              label="Address"
+              multiline
+              onChangeText={(value) => updateEditValue('address', value)}
+              testID="edit-lead-address-input"
+              value={editValues.address}
+            />
+            {editError ? (
+              <Text style={{ color: theme.colors.error }} variant="bodySmall">
+                {editError}
+              </Text>
+            ) : null}
+          </>
+        ) : (
+          <>
+            <DetailField label="Name" value={item.fullName ?? 'Not found'} />
+            <DetailField label="Role" value={item.jobTitle ?? 'Not found'} />
+            <DetailField label="Company" value={item.companyName ?? 'Not found'} />
+            <DetailField label="Product/Services" value={item.productServices ?? 'Not found'} />
+            <DetailField label="Email" value={item.email ?? 'Not found'} />
+            <DetailField label="Phone" value={item.phoneNumber ?? 'Not found'} />
+            <DetailField label="Address" value={item.address ?? 'Not found'} />
+          </>
+        )}
       </Surface>
 
-      <Surface elevation={1} style={[styles.detailPanel, { backgroundColor: theme.colors.surfaceContainer }]}>
-        <DetailField label="Status" value={getAssignmentLabel(item)} />
-        <DetailField label="Captured by" value="Team member" />
-        <DetailField label="Visible to" value={item.assignmentState ? getMemberLabel(memberLabel) : 'Team leads'} />
-      </Surface>
+      {!isPersonalHistory ? (
+        <Surface elevation={1} style={[styles.detailPanel, { backgroundColor: theme.colors.surfaceContainer }]}>
+          <DetailField label="Status" value={getAssignmentLabel(item)} />
+          <DetailField label="Captured by" value="Team member" />
+          <DetailField label="Visible to" value={item.assignmentState ? getMemberLabel(memberLabel) : 'Team leads'} />
+        </Surface>
+      ) : null}
 
       <View style={styles.detailActions}>
-        {mode === 'worker-history' && item.assignmentState ? (
+        {isEditing ? (
+          <>
+            <Button
+              loading={isSavingDetails}
+              disabled={isSavingDetails}
+              mode="contained"
+              onPress={saveLeadDetails}
+              testID="save-lead-details-button"
+            >
+              Save changes
+            </Button>
+            <Button
+              disabled={isSavingDetails}
+              mode="outlined"
+              onPress={() => {
+                setEditValues({
+                  address: item.address ?? '',
+                  companyName: item.companyName ?? '',
+                  email: item.email ?? '',
+                  fullName: item.fullName ?? '',
+                  jobTitle: item.jobTitle ?? '',
+                  phoneNumber: item.phoneNumber ?? '',
+                  productServices: item.productServices ?? ''
+                });
+                setEditError(null);
+                setIsEditing(false);
+              }}
+            >
+              Cancel
+            </Button>
+          </>
+        ) : (
+          <Button icon="pencil" mode="contained-tonal" onPress={() => setIsEditing(true)} testID="edit-lead-details-button">
+            Edit
+          </Button>
+        )}
+        {!isEditing && mode === 'worker-history' && item.assignmentState ? (
           <>
             <Button
               mode={item.assignmentState === 'done' ? 'contained' : 'outlined'}
@@ -612,7 +1054,7 @@ function AssignmentDetailScreen({
             </Button>
           </>
         ) : null}
-        {mode === 'leader-inbox' && item.assignmentState ? (
+        {!isEditing && mode === 'leader-inbox' && item.assignmentState ? (
           <Button mode="contained" onPress={() => onOpenReassignAssignment(item)}>
             Reassign card
           </Button>
@@ -632,6 +1074,110 @@ function DetailField({ label, value }: { label: string; value: string }) {
       </Text>
       <Text variant="titleSmall">{value}</Text>
     </View>
+  );
+}
+
+function EditableDetailField({
+  label,
+  onChangeText,
+  testID,
+  value,
+  ...inputProps
+}: {
+  label: string;
+  onChangeText: (value: string) => void;
+  testID: string;
+  value: string;
+} & Omit<ComponentProps<typeof TextInput>, 'label' | 'mode' | 'onChangeText' | 'testID' | 'value'>) {
+  return (
+    <TextInput
+      {...inputProps}
+      label={label}
+      mode="outlined"
+      onChangeText={onChangeText}
+      testID={testID}
+      value={value}
+    />
+  );
+}
+
+function CardCaptureModeScreen({
+  activeTeamName,
+  onCancel,
+  onSelect
+}: {
+  activeTeamName: string | null;
+  onCancel: () => void;
+  onSelect: (mode: CardCaptureMode) => void;
+}) {
+  const theme = useAppTheme();
+
+  return (
+    <ScreenShell>
+      <Surface elevation={2} style={[styles.detailHero, { backgroundColor: theme.colors.surfaceContainerHigh }]}>
+        <Text style={styles.screenKicker} variant="labelSmall">
+          {activeTeamName ?? 'Personal scan'}
+        </Text>
+        <Text variant="headlineSmall">Choose card capture type</Text>
+        <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
+          Use double-sided when important details may be printed on the back of the visiting card.
+        </Text>
+      </Surface>
+
+      <Surface elevation={1} style={[styles.captureModePanel, { backgroundColor: theme.colors.surfaceContainer }]}>
+        <Pressable
+          onPress={() => onSelect('singleSided')}
+          style={({ pressed }) => [
+            styles.captureModeOption,
+            {
+              backgroundColor: theme.colors.surfaceContainerHighest,
+              borderColor: theme.colors.outlineVariant,
+              opacity: pressed ? 0.78 : 1
+            }
+          ]}
+          testID="single-sided-capture-button"
+        >
+          <View style={[styles.captureModeIcon, { backgroundColor: theme.colors.primaryContainer }]}>
+            <MaterialCommunityIcons color={theme.colors.onPrimaryContainer} name="card-account-details-outline" size={24} />
+          </View>
+          <View style={styles.captureModeCopy}>
+            <Text variant="titleMedium">Single-sided card</Text>
+            <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
+              Capture one photo and review the parsed fields.
+            </Text>
+          </View>
+        </Pressable>
+
+        <Pressable
+          onPress={() => onSelect('doubleSided')}
+          style={({ pressed }) => [
+            styles.captureModeOption,
+            {
+              backgroundColor: theme.colors.surfaceContainerHighest,
+              borderColor: theme.colors.primary,
+              opacity: pressed ? 0.78 : 1
+            }
+          ]}
+          testID="double-sided-capture-button"
+        >
+          <View style={[styles.captureModeIcon, { backgroundColor: theme.colors.secondaryContainer }]}>
+            <MaterialCommunityIcons color={theme.colors.onSecondaryContainer} name="cards-outline" size={24} />
+          </View>
+          <View style={styles.captureModeCopy}>
+            <Text variant="titleMedium">Double-sided card</Text>
+            <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
+              Capture the front and back. Both sides are parsed together for better accuracy.
+            </Text>
+          </View>
+        </Pressable>
+      </Surface>
+
+      <View style={styles.detailActions}>
+        <Button mode="outlined" onPress={onCancel}>
+          Cancel
+        </Button>
+      </View>
+    </ScreenShell>
   );
 }
 
@@ -712,47 +1258,375 @@ function BatchApprovalConfirmScreen({
   );
 }
 
-function OcrReviewScreen({
+function ParsedCardReviewScreen({
   activeTeamName,
+  isSaving,
   review,
   onRetake,
   onSave
 }: {
   activeTeamName: string | null;
+  isSaving: boolean;
   review: PendingScanReview;
   onRetake: () => void;
-  onSave: () => void;
+  onSave: (parsed: ParsedCard) => void;
 }) {
   const theme = useAppTheme();
-  const previewLines = review.rawText.split('\n').map((line) => line.trim()).filter(Boolean);
+  const [fieldValues, setFieldValues] = useState<Record<ParsedCardField, string>>(() => parsedCardToEditableValues(review.parsed));
+  const [blocks, setBlocks] = useState<ParsedReviewBlock[]>(() => createParsedReviewBlocks(review.rawText, review.parsed));
+  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
+
+  const moveBlock = useCallback((blockId: string, targetField: ParsedReviewTarget) => {
+    setBlocks((currentBlocks) => {
+      const block = currentBlocks.find((candidate) => candidate.id === blockId);
+      if (!block) {
+        return currentBlocks;
+      }
+
+      setFieldValues((currentValues) => {
+        const nextValues = { ...currentValues };
+        if (block.assignedField !== 'extraText') {
+          nextValues[block.assignedField] = removeReviewBlockFromValue(nextValues[block.assignedField], block.text);
+        }
+
+        if (targetField !== 'extraText') {
+          nextValues[targetField] = appendReviewBlockToValue(nextValues[targetField], block.text);
+        }
+
+        return nextValues;
+      });
+
+      return currentBlocks.map((candidate) =>
+        candidate.id === blockId
+          ? {
+            ...candidate,
+            assignedField: targetField
+          }
+          : candidate
+      );
+    });
+    setSelectedBlockId(null);
+  }, []);
+
+  const updateFieldValue = useCallback((field: ParsedCardField, value: string) => {
+    setFieldValues((currentValues) => ({
+      ...currentValues,
+      [field]: value
+    }));
+  }, []);
+
+  const selectedBlock = selectedBlockId ? blocks.find((block) => block.id === selectedBlockId) ?? null : null;
+  const assignedBlockCount = blocks.filter((block) => block.assignedField !== 'extraText').length;
+  const extraBlockCount = blocks.length - assignedBlockCount;
 
   return (
     <ScreenShell>
-      <Surface elevation={2} style={[styles.detailHero, { backgroundColor: theme.colors.surfaceContainerHigh }]}>
-        <Text style={styles.screenKicker} variant="labelSmall">
-          {activeTeamName ?? 'Active team'}
-        </Text>
-        <Text variant="headlineSmall">Review scan</Text>
-        <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
-          Check what the app read from the card before saving it to the team inbox.
-        </Text>
+      <Surface elevation={2} style={[styles.parsedReviewHero, { backgroundColor: theme.colors.surfaceContainerHigh }]}>
+        <View style={styles.parsedReviewHeroTopRow}>
+          <View style={[styles.parsedReviewHeroIcon, { backgroundColor: theme.colors.primaryContainer }]}>
+            <MaterialCommunityIcons color={theme.colors.onPrimaryContainer} name="text-recognition" size={26} />
+          </View>
+          <Chip compact icon="account-multiple-outline" mode="outlined">
+            {activeTeamName ?? 'Personal scan'}
+          </Chip>
+        </View>
+        <View style={styles.parsedReviewHeroCopy}>
+          <Text style={styles.screenKicker} variant="labelSmall">
+            Card parsed
+          </Text>
+          <Text variant="headlineSmall">Review parsed fields</Text>
+          <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
+            Place each text block in the right field. Tap a block to select it, then use a drop target.
+          </Text>
+        </View>
+        <View style={styles.parsedReviewStats}>
+          <View style={[styles.parsedReviewStatPill, { backgroundColor: theme.colors.surfaceContainerHighest }]}>
+            <Text variant="titleMedium">{assignedBlockCount}</Text>
+            <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelSmall">
+              Placed
+            </Text>
+          </View>
+          <View style={[styles.parsedReviewStatPill, { backgroundColor: theme.colors.surfaceContainerHighest }]}>
+            <Text variant="titleMedium">{extraBlockCount}</Text>
+            <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelSmall">
+              Extra
+            </Text>
+          </View>
+        </View>
       </Surface>
 
-      <Surface elevation={1} style={[styles.detailPanel, { backgroundColor: theme.colors.surfaceContainer }]}>
-        <DetailField label="Possible name" value={previewLines[0] ?? 'Not found'} />
-        <DetailField label="Possible company" value={previewLines[1] ?? 'Not found'} />
-        <DetailField label="Text found on card" value={review.rawText} />
+      {selectedBlock ? (
+        <Surface
+          elevation={1}
+          style={[
+            styles.selectedReviewBlockBanner,
+            {
+              backgroundColor: theme.colors.primaryContainer,
+              borderColor: theme.colors.primary
+            }
+          ]}
+        >
+          <MaterialCommunityIcons color={theme.colors.onPrimaryContainer} name="cursor-move" size={20} />
+          <View style={styles.selectedReviewBlockCopy}>
+            <Text style={{ color: theme.colors.onPrimaryContainer }} variant="labelLarge">
+              Moving text block
+            </Text>
+            <Text numberOfLines={2} style={{ color: theme.colors.onPrimaryContainer }} variant="bodySmall">
+              {selectedBlock.text}
+            </Text>
+          </View>
+          <Button compact mode="text" onPress={() => setSelectedBlockId(null)}>
+            Cancel
+          </Button>
+        </Surface>
+      ) : null}
+
+      <Surface elevation={1} style={[styles.parsedReviewPanel, { backgroundColor: theme.colors.surfaceContainer }]}>
+        <View style={styles.parsedReviewSectionHeader}>
+          <View>
+            <Text variant="titleMedium">Contact fields</Text>
+            <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
+              Parsed values are editable. Blocks below each field show where the text came from.
+            </Text>
+          </View>
+        </View>
+        {parsedCardFields.map((field) => (
+          <ParsedReviewField
+            blocks={blocks.filter((block) => block.assignedField === field.key)}
+            field={field}
+            key={field.key}
+            moveBlock={moveBlock}
+            onChangeText={(value) => updateFieldValue(field.key, value)}
+            selectedBlockId={selectedBlockId}
+            setSelectedBlockId={setSelectedBlockId}
+            value={fieldValues[field.key]}
+          />
+        ))}
+      </Surface>
+
+      <Surface elevation={1} style={[styles.parsedReviewPanel, { backgroundColor: theme.colors.surfaceContainer }]}>
+        <View style={styles.parsedReviewFieldHeader}>
+          <View style={styles.parsedReviewFieldTitleRow}>
+            <MaterialCommunityIcons color={theme.colors.onSurfaceVariant} name="tray-arrow-down" size={18} />
+            <Text variant="titleSmall">Extra OCR text</Text>
+            <View style={[styles.reviewBlockCountBadge, { backgroundColor: theme.colors.surfaceContainerHighest }]}>
+              <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelSmall">
+                {extraBlockCount}
+              </Text>
+            </View>
+          </View>
+          {selectedBlock && selectedBlock.assignedField !== 'extraText' ? (
+            <Button compact mode="text" onPress={() => moveBlock(selectedBlock.id, 'extraText')}>
+              Drop here
+            </Button>
+          ) : null}
+        </View>
+        <View style={styles.reviewBlockList}>
+          {blocks.filter((block) => block.assignedField === 'extraText').map((block) => (
+            <ParsedReviewBlockChip
+              block={block}
+              key={block.id}
+              moveBlock={moveBlock}
+              selected={selectedBlockId === block.id}
+              setSelectedBlockId={setSelectedBlockId}
+            />
+          ))}
+        </View>
+        {blocks.every((block) => block.assignedField !== 'extraText') ? (
+          <View style={[styles.emptyReviewDropZone, { borderColor: theme.colors.outlineVariant }]}>
+            <MaterialCommunityIcons color={theme.colors.onSurfaceVariant} name="check-circle-outline" size={18} />
+            <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
+              No unassigned OCR text.
+            </Text>
+          </View>
+        ) : null}
       </Surface>
 
       <View style={styles.detailActions}>
-        <Button mode="contained" onPress={onSave} testID="save-ocr-review-button">
+        <Button
+          disabled={isSaving}
+          loading={isSaving}
+          mode="contained"
+          onPress={() => onSave(editableValuesToParsedCard(fieldValues))}
+          testID="save-parsed-review-button"
+        >
           Save to team inbox
         </Button>
-        <Button mode="outlined" onPress={onRetake}>
+        <Button disabled={isSaving} mode="outlined" onPress={onRetake}>
           Retake
         </Button>
       </View>
     </ScreenShell>
+  );
+}
+
+function ParsedReviewField({
+  blocks,
+  field,
+  moveBlock,
+  onChangeText,
+  selectedBlockId,
+  setSelectedBlockId,
+  value
+}: {
+  blocks: ParsedReviewBlock[];
+  field: (typeof parsedCardFields)[number];
+  moveBlock: (blockId: string, targetField: ParsedReviewTarget) => void;
+  onChangeText: (value: string) => void;
+  selectedBlockId: string | null;
+  setSelectedBlockId: (blockId: string | null) => void;
+  value: string;
+}) {
+  const selectedBlock = selectedBlockId ? blocks.find((block) => block.id === selectedBlockId) : null;
+  const theme = useAppTheme();
+
+  return (
+    <View style={[styles.parsedReviewField, { backgroundColor: theme.colors.surfaceContainerHighest }]}>
+      <View style={styles.parsedReviewFieldHeader}>
+        <View style={styles.parsedReviewFieldTitleRow}>
+          <Text variant="titleSmall">{field.label}</Text>
+          <View style={[styles.reviewBlockCountBadge, { backgroundColor: theme.colors.surfaceContainer }]}>
+            <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelSmall">
+              {blocks.length}
+            </Text>
+          </View>
+        </View>
+        {selectedBlockId && !selectedBlock ? (
+          <Button compact icon="tray-arrow-down" mode="contained-tonal" onPress={() => moveBlock(selectedBlockId, field.key)} testID={`drop-${field.key}-button`}>
+            Drop here
+          </Button>
+        ) : null}
+      </View>
+      <TextInput
+        autoCapitalize={field.key === 'email' ? 'none' : undefined}
+        keyboardType={field.keyboardType}
+        label={field.label}
+        mode="outlined"
+        multiline={field.multiline}
+        onChangeText={onChangeText}
+        testID={`parsed-review-${field.key}-input`}
+        value={value}
+      />
+      <View style={styles.reviewBlockList}>
+        {blocks.map((block) => (
+          <ParsedReviewBlockChip
+            block={block}
+            key={block.id}
+            moveBlock={moveBlock}
+            selected={selectedBlockId === block.id}
+            setSelectedBlockId={setSelectedBlockId}
+          />
+        ))}
+        {blocks.length === 0 ? (
+          <View style={[styles.emptyReviewDropZone, { borderColor: theme.colors.outlineVariant }]}>
+            <MaterialCommunityIcons color={theme.colors.onSurfaceVariant} name="gesture-tap" size={18} />
+            <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
+              Select a text block to drop it here.
+            </Text>
+          </View>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+function ParsedReviewBlockChip({
+  block,
+  moveBlock,
+  selected,
+  setSelectedBlockId
+}: {
+  block: ParsedReviewBlock;
+  moveBlock: (blockId: string, targetField: ParsedReviewTarget) => void;
+  selected: boolean;
+  setSelectedBlockId: (blockId: string | null) => void;
+}) {
+  const theme = useAppTheme();
+  const dragX = useSharedValue(0);
+  const dragY = useSharedValue(0);
+  const dragStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: dragX.value },
+      { translateY: dragY.value }
+    ]
+  }));
+  const panGesture = Gesture.Pan()
+    .onBegin(() => {
+      runOnJS(setSelectedBlockId)(block.id);
+    })
+    .onUpdate((event) => {
+      dragX.value = event.translationX;
+      dragY.value = event.translationY;
+    })
+    .onFinalize(() => {
+      dragX.value = withSpring(0);
+      dragY.value = withSpring(0);
+    });
+
+  return (
+    <GestureDetector gesture={panGesture}>
+      <Animated.View style={dragStyle}>
+        <Surface
+          elevation={selected ? 2 : 0}
+          style={[
+            styles.reviewBlockChip,
+            {
+              backgroundColor: selected ? theme.colors.primaryContainer : theme.colors.surfaceContainerHighest,
+              borderColor: selected ? theme.colors.primary : 'rgba(127, 127, 127, 0.22)'
+            }
+          ]}
+        >
+          <Pressable
+            onLongPress={() => setSelectedBlockId(selected ? null : block.id)}
+            onPress={() => setSelectedBlockId(selected ? null : block.id)}
+            style={styles.reviewBlockPressable}
+            testID={`review-block-${block.id}`}
+          >
+            <View style={styles.reviewBlockTopRow}>
+              <View
+                style={[
+                  styles.reviewBlockSourceBadge,
+                  {
+                    backgroundColor: selected ? theme.colors.surface : theme.colors.surfaceContainer,
+                    borderColor: selected ? theme.colors.primary : theme.colors.outlineVariant
+                  }
+                ]}
+              >
+                <Text style={{ color: selected ? theme.colors.primary : theme.colors.onSurfaceVariant }} variant="labelSmall">
+                  {block.source === 'ocr' ? 'OCR' : 'Parsed'}
+                </Text>
+              </View>
+              <MaterialCommunityIcons
+                color={selected ? theme.colors.primary : theme.colors.onSurfaceVariant}
+                name={selected ? 'cursor-move' : 'drag-horizontal-variant'}
+                size={18}
+              />
+            </View>
+            <Text style={{ color: selected ? theme.colors.onPrimaryContainer : theme.colors.onSurface }} variant="bodyMedium">
+              {block.text}
+            </Text>
+            <Text style={{ color: selected ? theme.colors.onPrimaryContainer : theme.colors.onSurfaceVariant }} variant="labelSmall">
+              {selected ? 'Choose a destination below' : 'Tap to move this block'}
+            </Text>
+          </Pressable>
+          {selected ? (
+            <View style={styles.reviewBlockActions}>
+              {parsedCardFields.map((field) => (
+                <Button
+                  compact
+                  key={field.key}
+                  mode={block.assignedField === field.key ? 'contained-tonal' : 'text'}
+                  onPress={() => moveBlock(block.id, field.key)}
+                  testID={`move-${block.id}-to-${field.key}-button`}
+                >
+                  {field.label}
+                </Button>
+              ))}
+            </View>
+          ) : null}
+        </Surface>
+      </Animated.View>
+    </GestureDetector>
   );
 }
 
@@ -825,7 +1699,6 @@ function TeamScreen({
   activeTeamId,
   activeTeamName,
   teams,
-  isTeamCreationLoading,
   isTeamMembersLoading,
   isTeamsLoading,
   isInviteCreationLoading,
@@ -834,49 +1707,25 @@ function TeamScreen({
   teamPendingInvites,
   onCreateInvite,
   onPromoteMember,
-  onCreateTeam,
   onSelectTeam
 }: {
   activeTeamId: string | null;
   activeTeamName: string | null;
   teams: AccessibleTeam[];
-  isTeamCreationLoading: boolean;
   isTeamMembersLoading: boolean;
   isTeamsLoading: boolean;
   isInviteCreationLoading: boolean;
   currentUserId: string;
   members: TeamMember[];
   teamPendingInvites: TeamWorkspaceState['teamPendingInvites'];
-  onCreateTeam: (teamName: string) => Promise<void>;
   onCreateInvite: (invitedEmail: string) => Promise<void>;
   onPromoteMember: (userId: string) => Promise<void>;
   onSelectTeam: (teamId: string) => void;
 }) {
   const theme = useAppTheme();
-  const [teamName, setTeamName] = useState('');
-  const [teamError, setTeamError] = useState<string | null>(null);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [memberError, setMemberError] = useState<string | null>(null);
-
-  const handleCreateTeam = () => {
-    const trimmedName = teamName.trim();
-    if (!trimmedName) {
-      setTeamError('Enter a team name before creating one.');
-      return;
-    }
-
-    void (async () => {
-      setTeamError(null);
-
-      try {
-        await onCreateTeam(trimmedName);
-        setTeamName('');
-      } catch (error) {
-        setTeamError(error instanceof Error ? error.message : 'Team creation failed');
-      }
-    })();
-  };
 
   const handleCreateInvite = () => {
     const trimmedEmail = inviteEmail.trim();
@@ -898,7 +1747,7 @@ function TeamScreen({
   };
 
   const hasActiveTeam = Boolean(activeTeamId);
-  const canSwitchTeams = teams.length > 1;
+  const canSwitchTeams = teams.length > 1 || (!activeTeamId && teams.length > 0);
   const leaderCount = members.filter((member) => member.isLeader).length;
 
   return (
@@ -935,47 +1784,6 @@ function TeamScreen({
           </View>
         </Animated.View>
       ) : null}
-
-      <Animated.View entering={FadeInDown.delay(hasActiveTeam ? 170 : 140).duration(motion.duration.medium1).easing(motion.easing.emphasized)}>
-        <Surface
-          elevation={1}
-          style={[styles.managementPanel, { backgroundColor: theme.colors.surfaceContainer }]}
-        >
-          <View style={styles.teamSectionHeader}>
-            <Text variant="titleMedium">{hasActiveTeam ? 'Create another team' : 'Create your first team'}</Text>
-            <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
-              {hasActiveTeam
-                ? 'Add a new workspace if you need a separate group.'
-                : 'Create a team before you can invite members or manage a current team.'}
-            </Text>
-          </View>
-          <TextInput
-            label="Team name"
-            mode="outlined"
-            onChangeText={(value) => {
-              setTeamName(value);
-              setTeamError(null);
-            }}
-            placeholder="North Hall"
-            testID="team-name-input"
-            value={teamName}
-          />
-          <Button
-            disabled={isTeamCreationLoading}
-            loading={isTeamCreationLoading}
-            mode="contained"
-            onPress={handleCreateTeam}
-            testID="create-team-button"
-          >
-            Create team
-          </Button>
-          {teamError ? (
-            <Text style={{ color: theme.colors.error }} variant="bodySmall">
-              {teamError}
-            </Text>
-          ) : null}
-        </Surface>
-      </Animated.View>
 
       {hasActiveTeam ? (
         <>
@@ -1207,9 +2015,15 @@ function TeamScreen({
 }
 
 function ProfileScreen({
+  hasTeamWorkspace,
+  isTeamCreationLoading,
+  onCreateTeam,
   onSignOut,
   userEmail
 }: {
+  hasTeamWorkspace: boolean;
+  isTeamCreationLoading: boolean;
+  onCreateTeam: (teamName: string) => Promise<void>;
   onSignOut: () => void;
   userEmail: string | null | undefined;
 }) {
@@ -1217,9 +2031,30 @@ function ProfileScreen({
   const { colorMode, toggleColorMode } = useMaterialThemeControls();
   const history = useScannerQueueStore((state) => state.history);
   const queue = useScannerQueueStore((state) => state.queue);
+  const [teamName, setTeamName] = useState('');
+  const [teamError, setTeamError] = useState<string | null>(null);
   const parsedCount = history.filter((item) => item.parseStatus === 'parsed').length;
   const inFlightCount = queue.filter((item) => item.status !== 'failed').length;
   const failedCount = queue.filter((item) => item.status === 'failed').length;
+
+  const handleCreateTeam = () => {
+    const trimmedName = teamName.trim();
+    if (!trimmedName) {
+      setTeamError('Enter a team name before creating one.');
+      return;
+    }
+
+    void (async () => {
+      setTeamError(null);
+
+      try {
+        await onCreateTeam(trimmedName);
+        setTeamName('');
+      } catch (error) {
+        setTeamError(error instanceof Error ? error.message : 'Team creation failed');
+      }
+    })();
+  };
 
   return (
     <ScreenShell>
@@ -1228,9 +2063,7 @@ function ProfileScreen({
           elevation={2}
           style={[styles.profileHero, { backgroundColor: theme.colors.surfaceContainerHigh }]}
         >
-          <View style={[styles.profileAvatar, { backgroundColor: theme.colors.tertiaryContainer }]}>
-            <List.Icon color={theme.colors.onTertiaryContainer} icon="account-circle" />
-          </View>
+          <AppLogo compact size={60} variant="mark" />
           <View style={styles.profileHeroCopy}>
             <Text style={styles.screenKicker} variant="labelSmall">
               Account
@@ -1257,6 +2090,47 @@ function ProfileScreen({
       </Animated.View>
 
       <Animated.View entering={FadeInDown.delay(160).duration(motion.duration.medium2).easing(motion.easing.emphasized)}>
+        <Surface
+          elevation={1}
+          style={[styles.managementPanel, { backgroundColor: theme.colors.surfaceContainer }]}
+        >
+          <View style={styles.teamSectionHeader}>
+            <Text variant="titleMedium">{hasTeamWorkspace ? 'Create another team' : 'Create your first team'}</Text>
+            <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
+              {hasTeamWorkspace
+                ? 'Add a separate workspace when you need team capture and assignment tools.'
+                : 'Create a team only when you want shared scanning, invites, and assignments.'}
+            </Text>
+          </View>
+          <TextInput
+            label="Team name"
+            mode="outlined"
+            onChangeText={(value) => {
+              setTeamName(value);
+              setTeamError(null);
+            }}
+            placeholder="North Hall"
+            testID="profile-team-name-input"
+            value={teamName}
+          />
+          <Button
+            disabled={isTeamCreationLoading}
+            loading={isTeamCreationLoading}
+            mode="contained"
+            onPress={handleCreateTeam}
+            testID="profile-create-team-button"
+          >
+            Create team
+          </Button>
+          {teamError ? (
+            <Text style={{ color: theme.colors.error }} variant="bodySmall">
+              {teamError}
+            </Text>
+          ) : null}
+        </Surface>
+      </Animated.View>
+
+      <Animated.View entering={FadeInDown.delay(210).duration(motion.duration.medium2).easing(motion.easing.emphasized)}>
         <Surface
           elevation={1}
           style={[styles.palettePanel, { backgroundColor: theme.colors.surfaceContainer }]}
@@ -1286,13 +2160,13 @@ function ProfileScreen({
         </Surface>
       </Animated.View>
 
-      <Animated.View entering={FadeInDown.delay(210).duration(motion.duration.medium1).easing(motion.easing.emphasized)}>
+      <Animated.View entering={FadeInDown.delay(260).duration(motion.duration.medium1).easing(motion.easing.emphasized)}>
         <Button icon="logout" mode="outlined" onPress={onSignOut}>
           Sign out
         </Button>
       </Animated.View>
 
-      <Animated.View entering={FadeInDown.delay(260).duration(motion.duration.medium2).easing(motion.easing.emphasized)}>
+      <Animated.View entering={FadeInDown.delay(310).duration(motion.duration.medium2).easing(motion.easing.emphasized)}>
         <Surface
           elevation={1}
           style={[styles.profileAccountPanel, { backgroundColor: theme.colors.surfaceContainer }]}
@@ -1321,6 +2195,9 @@ function ProfileScreen({
 }
 
 function CameraScreen({
+  allowGallery,
+  captureHint,
+  captureTitle,
   handleCapture,
   handlePickFromGallery,
   handleTakePicture,
@@ -1331,6 +2208,9 @@ function CameraScreen({
   permission,
   previewUri
 }: {
+  allowGallery: boolean;
+  captureHint: string;
+  captureTitle: string;
   handleCapture: (uri: string) => void;
   handlePickFromGallery: () => void;
   handleTakePicture: (camera: CameraView | null) => Promise<string | null>;
@@ -1343,6 +2223,8 @@ function CameraScreen({
 }) {
   const cameraRef = useRef<CameraView | null>(null);
   const theme = useAppTheme();
+  const { height, width } = useWindowDimensions();
+  const isLandscape = width > height;
   const containerScale = useSharedValue(0.92);
   const containerOpacity = useSharedValue(0);
 
@@ -1384,13 +2266,13 @@ function CameraScreen({
       ) : (
         <>
           <CameraView facing="back" ref={cameraRef} style={StyleSheet.absoluteFill} testID="camera-viewfinder" />
-          <View style={styles.viewfinderScrim} pointerEvents="none">
-            <View style={styles.viewfinderPanel}>
-              <Text style={{ color: theme.colors.onSurfaceVariant, marginBottom: 12 }} variant="labelMedium">
-                Align the card inside the frame
-              </Text>
-              <View style={[styles.viewfinderFrame, { borderColor: theme.colors.primary }]} />
-            </View>
+          <View style={styles.cameraGuidance} pointerEvents="none">
+            <Text style={{ color: theme.colors.surface }} variant="labelLarge">
+              {captureTitle}
+            </Text>
+            <Text style={{ color: theme.colors.surface }} variant="bodySmall">
+              {captureHint}
+            </Text>
           </View>
           <Animated.View
             entering={FadeInDown.delay(80).duration(motion.duration.medium1).easing(motion.easing.emphasized)}
@@ -1406,7 +2288,7 @@ function CameraScreen({
               testID="close-camera-button"
             />
             <StatusChip status={isCapturing || previewUri ? 'scanning' : inFlightCount > 0 ? 'saving' : 'idle'} />
-            {__DEV__ ? (
+            {__DEV__ && allowGallery ? (
               <Button
                 compact
                 icon="image"
@@ -1418,7 +2300,12 @@ function CameraScreen({
               </Button>
             ) : null}
           </Animated.View>
-          <CaptureButton disabled={isCapturing} onCapture={handleCapture} takePicture={takePicture} />
+          <CaptureButton
+            disabled={isCapturing}
+            onCapture={handleCapture}
+            placement={isLandscape ? 'right' : 'bottom'}
+            takePicture={takePicture}
+          />
           <CornerPill count={inFlightCount} onPress={onOpenQueue} />
         </>
       )}
@@ -1488,7 +2375,11 @@ function ScannerApp({
   const [previewUri, setPreviewUri] = useState<string | null>(null);
   const [selectedReassignItem, setSelectedReassignItem] = useState<TeamInboxItem | null>(null);
   const [selectedHistoryItem, setSelectedHistoryItem] = useState<TeamInboxItem | null>(null);
+  const [isSavingParsedReview, setIsSavingParsedReview] = useState(false);
   const [pendingScanReview, setPendingScanReview] = useState<PendingScanReview | null>(null);
+  const [captureMode, setCaptureMode] = useState<CardCaptureMode | null>(null);
+  const [isCaptureModePickerOpen, setIsCaptureModePickerOpen] = useState(false);
+  const [pendingFrontSide, setPendingFrontSide] = useState<(CapturedCardSide & { leadId: string }) | null>(null);
   const [pendingCaptureConfirmationTeamId, setPendingCaptureConfirmationTeamId] = useState<string | null>(null);
   const {
     activeTeamId,
@@ -1499,6 +2390,7 @@ function ScannerApp({
     approveBatch,
     createBatch,
     createInvite,
+    hasTeamWorkspace,
     historyActiveTeamId,
     historyTeamName,
     historyItems,
@@ -1519,9 +2411,11 @@ function ScannerApp({
     reassignAssignment,
     removeBatchItem,
     updateAssignmentState,
+    updateLeadDetails,
     selectTeam
   } = workspace;
   const captureLockRef = useRef(false);
+  const captureGenerationRef = useRef(0);
   const queueSheetRef = useRef<BottomSheetModal>(null);
   const batchSheetRef = useRef<BottomSheetModal>(null);
   const reassignSheetRef = useRef<BottomSheetModal>(null);
@@ -1533,15 +2427,19 @@ function ScannerApp({
   const queue = useScannerQueueStore((state) => state.queue);
   const history = useScannerQueueStore((state) => state.history);
   const systemNotice = useScannerQueueStore((state) => state.systemNotice);
-  const enqueue = useScannerQueueStore((state) => state.enqueue);
+  const recordHistory = useScannerQueueStore((state) => state.recordHistory);
   const clearSystemNotice = useScannerQueueStore((state) => state.clearSystemNotice);
   const retry = useScannerQueueStore((state) => state.retry);
   const drainOnce = useScannerQueueStore((state) => state.drainOnce);
 
   const inFlightCount = queue.filter((item) => item.status !== 'failed').length;
   const failedCount = queue.filter((item) => item.status === 'failed').length;
-  const activeIndex = routes.findIndex((route) => route.key === activeTab);
+  const visibleRoutes = hasTeamWorkspace ? routes : routes.filter((route) => route.key !== 'team');
+  const activeIndex = visibleRoutes.findIndex((route) => route.key === activeTab);
   const pageDirection = activeIndex >= previousTabIndex ? 1 : -1;
+  const captureTeamId = activeTeamId && hasTeamWorkspace ? activeTeamId : null;
+  const displayActiveTeamName = captureTeamId ? activeTeamName : null;
+  const isPersonalHistory = !historyActiveTeamId;
   const dashboardStatus: OcrStatus = failedCount > 0
     ? 'failed'
     : inFlightCount > 0
@@ -1549,12 +2447,27 @@ function ScannerApp({
       : history.some((item) => item.parseStatus === 'parsed')
         ? 'parsed'
         : 'idle';
+  const captureTitle = captureMode === 'doubleSided' && pendingFrontSide ? 'Capture back side' : 'Capture front side';
+  const captureHint = captureMode === 'doubleSided'
+    ? pendingFrontSide
+      ? 'Flip the same card and capture the back side.'
+      : 'Start with the front side that shows the name or company.'
+    : 'Align the card clearly and capture one side.';
+  const visibleHistoryItems = isPersonalHistory
+    ? history.map((item) => scannerHistoryToInboxItem(item, session.user.id))
+    : historyItems;
 
   useEffect(() => {
     if (!permission) {
       void requestPermission();
     }
   }, [permission, requestPermission]);
+
+  useEffect(() => {
+    if (!hasTeamWorkspace && activeTab === 'team') {
+      setActiveTab('profile');
+    }
+  }, [activeTab, hasTeamWorkspace]);
   useEffect(() => {
     const runGc = async (): Promise<void> => {
       try {
@@ -1623,19 +2536,87 @@ function ScannerApp({
   }, []);
 
   const handleCapture = useCallback((uri: string): void => {
+    const captureGeneration = captureGenerationRef.current + 1;
+    captureGenerationRef.current = captureGeneration;
     setPreviewUri(uri);
 
     void (async () => {
       try {
-        const leadId = createUuid();
-        const { cachePath } = await prepareImage(uri, leadId);
+        const selectedMode = captureMode ?? 'singleSided';
+        const side: CardSide = selectedMode === 'doubleSided' && pendingFrontSide ? 'back' : 'front';
+        const leadId = pendingFrontSide?.leadId ?? createUuid();
+        const imageLeadId = selectedMode === 'doubleSided' ? `${leadId}-${side}` : leadId;
+        const { cachePath } = await prepareImage(uri, imageLeadId);
+        if (captureGenerationRef.current !== captureGeneration) {
+          return;
+        }
+
         const rawText = await extractText(cachePath);
-        setPendingScanReview({
+        if (captureGenerationRef.current !== captureGeneration) {
+          return;
+        }
+
+        const storagePath = await uploadCardImage(cachePath, imageLeadId);
+        if (captureGenerationRef.current !== captureGeneration) {
+          return;
+        }
+
+        const capturedSide: CapturedCardSide = {
           cachePath,
-          leadId,
           rawText,
-          teamId: activeTeamId
+          side,
+          storagePath
+        };
+
+        if (selectedMode === 'doubleSided' && !pendingFrontSide) {
+          setPendingFrontSide({
+            ...capturedSide,
+            leadId
+          });
+          setPreviewUri(null);
+          return;
+        }
+
+        const capturedSides = pendingFrontSide
+          ? [
+              {
+                cachePath: pendingFrontSide.cachePath,
+                rawText: pendingFrontSide.rawText,
+                side: pendingFrontSide.side,
+                storagePath: pendingFrontSide.storagePath
+              },
+              capturedSide
+            ]
+          : [capturedSide];
+        const rawTextForReview = selectedMode === 'doubleSided'
+          ? formatCardSideRawText(capturedSides)
+          : rawText;
+        const storagePaths = capturedSides.map((cardSide) => cardSide.storagePath);
+        const cachePaths = capturedSides.map((cardSide) => cardSide.cachePath);
+
+        const parsedPreview = await parseCardPreview({
+          imagePath: storagePaths[0],
+          imagePaths: storagePaths,
+          leadId,
+          rawText: rawTextForReview,
+          teamId: captureTeamId
         });
+        if (captureGenerationRef.current !== captureGeneration) {
+          return;
+        }
+
+        setPendingScanReview({
+          cachePath: cachePaths[0],
+          cachePaths,
+          leadId,
+          parsed: parsedPreview.parsed,
+          parseStatus: parsedPreview.parseStatus,
+          rawText: rawTextForReview,
+          storagePath: storagePaths[0],
+          storagePaths,
+          teamId: captureTeamId
+        });
+        setPendingFrontSide(null);
         setIsCameraOpen(false);
       } catch (error) {
         if (error instanceof BlurryImageError) {
@@ -1646,27 +2627,74 @@ function ScannerApp({
         console.error('Capture pipeline failed', error);
         Alert.alert('Scan failed', 'Please try again');
       } finally {
-        setPreviewUri(null);
+        if (captureGenerationRef.current === captureGeneration) {
+          setPreviewUri(null);
+        }
       }
     })();
-  }, [activeTeamId, enqueue]);
+  }, [captureMode, captureTeamId, pendingFrontSide]);
 
-  const savePendingScanReview = useCallback(() => {
+  const savePendingScanReview = useCallback((parsed: ParsedCard) => {
     if (!pendingScanReview) {
       return;
     }
 
-    enqueue({
-      id: pendingScanReview.leadId,
-      imagePath: pendingScanReview.cachePath,
-      rawText: pendingScanReview.rawText,
-      teamId: pendingScanReview.teamId
-    });
-    setPendingScanReview(null);
-  }, [enqueue, pendingScanReview]);
+    setIsSavingParsedReview(true);
+    void (async () => {
+      try {
+        let savedScan: { parsed: ParsedCard; parseStatus: ParseStatus };
+
+        try {
+          savedScan = await withTimeout(
+            saveParsedCard({
+              imagePath: pendingScanReview.storagePath,
+              imagePaths: pendingScanReview.storagePaths,
+              leadId: pendingScanReview.leadId,
+              parsed,
+              rawText: pendingScanReview.rawText,
+              teamId: pendingScanReview.teamId
+            }),
+            REVIEW_SAVE_TIMEOUT_MS,
+            'Saving the reviewed card timed out.'
+          );
+        } catch (error) {
+          await withTimeout(
+            updateExistingReviewedLead(pendingScanReview.leadId, parsed),
+            REVIEW_SAVE_TIMEOUT_MS,
+            'Updating the reviewed card timed out.'
+          );
+          savedScan = {
+            parsed,
+            parseStatus: getLocalParseStatus(parsed)
+          };
+        }
+
+        const archivedImagePath = await archiveReviewedImage(pendingScanReview.cachePath, pendingScanReview.leadId);
+        recordHistory({
+          id: pendingScanReview.leadId,
+          imagePath: archivedImagePath,
+          parsed: savedScan.parsed,
+          parseStatus: savedScan.parseStatus,
+          rawText: pendingScanReview.rawText,
+          storagePath: pendingScanReview.storagePath
+        });
+
+        await Promise.all(pendingScanReview.cachePaths.map((cachePath) => FileSystem.deleteAsync(cachePath, { idempotent: true })));
+        setPendingScanReview(null);
+      } catch (error) {
+        console.warn('Reviewed scan save failed', error);
+        Alert.alert('Save failed', 'Please check your connection and try again.');
+      } finally {
+        setIsSavingParsedReview(false);
+      }
+    })();
+  }, [pendingScanReview, recordHistory]);
 
   const retakePendingScanReview = useCallback(() => {
+    captureGenerationRef.current += 1;
     setPendingScanReview(null);
+    setPendingFrontSide(null);
+    setIsSavingParsedReview(false);
     setIsCameraOpen(true);
   }, []);
 
@@ -1691,18 +2719,31 @@ function ScannerApp({
   }, [activeIndex]);
 
   const openCamera = useCallback(() => {
-    if (activeTeamId && pendingCaptureConfirmationTeamId === activeTeamId && activeTeamName) {
+    if (captureTeamId && pendingCaptureConfirmationTeamId === captureTeamId && activeTeamName) {
       setIsTeamCaptureConfirmOpen(true);
       return;
     }
 
-    setIsCameraOpen(true);
-  }, [activeTeamId, activeTeamName, pendingCaptureConfirmationTeamId]);
+    setIsCaptureModePickerOpen(true);
+  }, [activeTeamName, captureTeamId, pendingCaptureConfirmationTeamId]);
 
   const confirmTeamAndOpenCamera = useCallback(() => {
     setPendingCaptureConfirmationTeamId(null);
     setIsTeamCaptureConfirmOpen(false);
+    setIsCaptureModePickerOpen(true);
+  }, []);
+
+  const startCaptureMode = useCallback((mode: CardCaptureMode) => {
+    setCaptureMode(mode);
+    setPendingFrontSide(null);
+    setIsCaptureModePickerOpen(false);
     setIsCameraOpen(true);
+  }, []);
+
+  const cancelCaptureMode = useCallback(() => {
+    setCaptureMode(null);
+    setPendingFrontSide(null);
+    setIsCaptureModePickerOpen(false);
   }, []);
 
   const openBatchEditor = useCallback(() => {
@@ -1724,8 +2765,8 @@ function ScannerApp({
   );
 
   const pendingBatchItemSet = new Set(pendingBatchItems.map((item) => item.scannedLeadId));
-  const pendingBatchCards = historyItems.filter((item) => pendingBatchItemSet.has(item.id));
-  const pendingBatchAvailableCards = historyItems.filter(
+  const pendingBatchCards = visibleHistoryItems.filter((item) => pendingBatchItemSet.has(item.id));
+  const pendingBatchAvailableCards = visibleHistoryItems.filter(
     (item) => !pendingBatchItemSet.has(item.id) && !item.assignmentState
   );
 
@@ -1770,10 +2811,12 @@ function ScannerApp({
             return (
               <AssignmentDetailScreen
                 item={selectedHistoryItem}
+                isPersonalHistory={isPersonalHistory}
                 memberLabel={memberLabel}
                 mode={historyMode}
                 onBack={() => setSelectedHistoryItem(null)}
                 onOpenReassignAssignment={openReassignSheet}
+                onUpdateLeadDetails={updateLeadDetails}
                 onUpdateAssignmentState={updateAssignmentState}
               />
             );
@@ -1788,7 +2831,8 @@ function ScannerApp({
               teamName={historyTeamName}
               isBatchActionLoading={isBatchActionLoading}
               isLoading={isHistoryLoading}
-              items={historyItems}
+              isPersonalHistory={isPersonalHistory}
+              items={visibleHistoryItems}
               mode={historyMode}
               onApproveBatch={() => setIsBatchApprovalConfirmOpen(true)}
               onEditBatch={openBatchEditor}
@@ -1800,12 +2844,23 @@ function ScannerApp({
             />
           );
         case 'team':
+          if (!hasTeamWorkspace) {
+            return (
+              <ProfileScreen
+                hasTeamWorkspace={hasTeamWorkspace}
+                isTeamCreationLoading={isTeamCreationLoading}
+                onCreateTeam={createTeam}
+                onSignOut={onSignOut}
+                userEmail={session.user.email}
+              />
+            );
+          }
+
           return (
             <TeamScreen
               activeTeamId={activeTeamId}
               activeTeamName={activeTeamName}
               teams={teams}
-              isTeamCreationLoading={isTeamCreationLoading}
               isTeamMembersLoading={isTeamMembersLoading}
               currentUserId={session.user.id}
               isInviteCreationLoading={isInviteCreationLoading}
@@ -1813,7 +2868,6 @@ function ScannerApp({
               teamPendingInvites={teamPendingInvites}
               onCreateInvite={createInvite}
               isTeamsLoading={isTeamsLoading}
-              onCreateTeam={createTeam}
               onPromoteMember={promoteMember}
               onSelectTeam={handleSelectTeam}
             />
@@ -1821,6 +2875,9 @@ function ScannerApp({
         case 'profile':
           return (
             <ProfileScreen
+              hasTeamWorkspace={hasTeamWorkspace}
+              isTeamCreationLoading={isTeamCreationLoading}
+              onCreateTeam={createTeam}
               onSignOut={onSignOut}
               userEmail={session.user.email}
             />
@@ -1829,8 +2886,9 @@ function ScannerApp({
         default:
           return (
             <DashboardScreen
-              activeTeamName={activeTeamName}
+              activeTeamName={displayActiveTeamName}
               failedCount={failedCount}
+              hasTeamWorkspace={hasTeamWorkspace}
               history={history}
               inFlightCount={inFlightCount}
               onOpenCamera={openCamera}
@@ -1845,6 +2903,7 @@ function ScannerApp({
         failedCount,
         history,
         activeTeamId,
+        hasTeamWorkspace,
         teams,
         historyActiveTeamId,
         historyTeamName,
@@ -1878,8 +2937,13 @@ function ScannerApp({
         reassignAssignment,
         removeBatchItem,
         updateAssignmentState,
+        updateLeadDetails,
         handleSelectTeam,
         activeTeamName,
+        displayActiveTeamName,
+        isPersonalHistory,
+        isTeamCreationLoading,
+        visibleHistoryItems,
         session.user.email
       ]
   );
@@ -1887,30 +2951,46 @@ function ScannerApp({
   return (
     <View style={[styles.appContainer, { backgroundColor: theme.colors.background }]}>
       {pendingScanReview ? (
-        <OcrReviewScreen
-          activeTeamName={activeTeamName}
+        <ParsedCardReviewScreen
+          activeTeamName={displayActiveTeamName}
+          isSaving={isSavingParsedReview}
           review={pendingScanReview}
           onRetake={retakePendingScanReview}
           onSave={savePendingScanReview}
         />
-      ) : isTeamCaptureConfirmOpen && activeTeamName ? (
+      ) : isCaptureModePickerOpen ? (
+        <CardCaptureModeScreen
+          activeTeamName={displayActiveTeamName}
+          onCancel={cancelCaptureMode}
+          onSelect={startCaptureMode}
+        />
+      ) : isTeamCaptureConfirmOpen && displayActiveTeamName ? (
         <TeamCaptureConfirmScreen
-          activeTeamName={activeTeamName}
+          activeTeamName={displayActiveTeamName}
           onConfirm={confirmTeamAndOpenCamera}
           onSwitchTeam={() => {
             setIsTeamCaptureConfirmOpen(false);
             setPreviousTabIndex(activeIndex >= 0 ? activeIndex : 0);
-            setActiveTab('team');
+            setActiveTab(hasTeamWorkspace ? 'team' : 'profile');
           }}
         />
       ) : isCameraOpen ? (
         <CameraScreen
+          allowGallery={captureMode !== 'doubleSided'}
+          captureHint={captureHint}
+          captureTitle={captureTitle}
           handleCapture={handleCapture}
           handlePickFromGallery={handlePickFromGallery}
           handleTakePicture={handleTakePicture}
           inFlightCount={inFlightCount}
           isCapturing={isCapturing}
-          onClose={() => setIsCameraOpen(false)}
+          onClose={() => {
+            captureGenerationRef.current += 1;
+            setPreviewUri(null);
+            setPendingFrontSide(null);
+            setCaptureMode(null);
+            setIsCameraOpen(false);
+          }}
           onOpenQueue={() => queueSheetRef.current?.present()}
           permission={permission}
           previewUri={previewUri}
@@ -1942,7 +3022,7 @@ function ScannerApp({
             activeKey={activeTab}
             bottomInset={insets.bottom}
             onChange={handleTabChange}
-            routes={routes}
+            routes={visibleRoutes}
           />
         </>
       )}
@@ -1994,6 +3074,7 @@ function ScannerApp({
 export default function App() {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
   const [isScannerStoreReady, setIsScannerStoreReady] = useState(false);
+  const handledOAuthCallbackUrls = useRef(new Set<string>());
 
   useEffect(() => {
     let cancelled = false;
@@ -2026,15 +3107,61 @@ export default function App() {
     let cancelled = false;
 
     const handleOAuthRedirect = async (url: string): Promise<void> => {
-      const code = getOAuthCodeFromUrl(url);
-      if (!code) {
+      if (handledOAuthCallbackUrls.current.has(url)) {
         return;
       }
 
-      const { error } = await supabase.auth.exchangeCodeForSession(code);
-      if (!cancelled && error) {
-        console.warn('Supabase OAuth callback failed', error);
+      const params = getOAuthCallbackParams(url);
+      const errorDescription = params.get('error_description') ?? params.get('error');
+      const code = params.get('code') ?? getOAuthCodeFromUrl(url);
+      const accessToken = params.get('access_token');
+      const refreshToken = params.get('refresh_token');
+
+      if (!code && (!accessToken || !refreshToken) && !errorDescription) {
+        return;
       }
+
+      handledOAuthCallbackUrls.current.add(url);
+
+      if (errorDescription) {
+        console.warn('Supabase OAuth callback failed', errorDescription);
+        return;
+      }
+
+      if (code) {
+        const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+        if (cancelled) {
+          return;
+        }
+
+        if (error) {
+          console.warn('Supabase OAuth callback failed', error);
+          return;
+        }
+
+        setSession(data.session ?? null);
+        return;
+      }
+
+      if (!accessToken || !refreshToken) {
+        return;
+      }
+
+      const { data, error } = await supabase.auth.setSession({
+        access_token: accessToken,
+        refresh_token: refreshToken
+      });
+
+      if (cancelled) {
+        return;
+      }
+
+      if (error) {
+        console.warn('Supabase OAuth callback failed', error);
+        return;
+      }
+
+      setSession(data.session ?? null);
     };
 
     void Linking.getInitialURL().then((url) => {
@@ -2227,6 +3354,18 @@ const styles = StyleSheet.create({
     elevation: 8,
     position: 'absolute'
   },
+  cameraGuidance: {
+    alignSelf: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.42)',
+    borderRadius: 18,
+    gap: 3,
+    left: 24,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    position: 'absolute',
+    right: 24,
+    top: 112
+  },
   cameraTopBar: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -2263,6 +3402,30 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between'
   },
+  captureModeCopy: {
+    flex: 1,
+    gap: 4
+  },
+  captureModeIcon: {
+    alignItems: 'center',
+    borderRadius: 18,
+    height: 48,
+    justifyContent: 'center',
+    width: 48
+  },
+  captureModeOption: {
+    alignItems: 'center',
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    gap: 12,
+    padding: 14
+  },
+  captureModePanel: {
+    borderRadius: 22,
+    gap: 12,
+    padding: 12
+  },
   detailField: {
     borderBottomColor: 'rgba(127, 127, 127, 0.22)',
     borderBottomWidth: StyleSheet.hairlineWidth,
@@ -2279,6 +3442,124 @@ const styles = StyleSheet.create({
     gap: 2,
     paddingHorizontal: 16,
     paddingVertical: 8
+  },
+  emptyReviewDropZone: {
+    alignItems: 'center',
+    borderRadius: 14,
+    borderStyle: 'dashed',
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 8,
+    minHeight: 44,
+    paddingHorizontal: 12,
+    paddingVertical: 10
+  },
+  parsedReviewHero: {
+    borderRadius: 24,
+    gap: 16,
+    overflow: 'hidden',
+    padding: 18
+  },
+  parsedReviewHeroCopy: {
+    gap: 6
+  },
+  parsedReviewHeroIcon: {
+    alignItems: 'center',
+    borderRadius: 18,
+    height: 48,
+    justifyContent: 'center',
+    width: 48
+  },
+  parsedReviewHeroTopRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between'
+  },
+  parsedReviewPanel: {
+    borderRadius: 22,
+    gap: 12,
+    padding: 12
+  },
+  parsedReviewSectionHeader: {
+    gap: 4,
+    paddingHorizontal: 4,
+    paddingTop: 2
+  },
+  parsedReviewStatPill: {
+    borderRadius: 16,
+    flex: 1,
+    gap: 2,
+    paddingHorizontal: 14,
+    paddingVertical: 12
+  },
+  parsedReviewStats: {
+    flexDirection: 'row',
+    gap: 10
+  },
+  parsedReviewField: {
+    borderRadius: 18,
+    gap: 10,
+    padding: 12
+  },
+  parsedReviewFieldHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12
+  },
+  parsedReviewFieldTitleRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexShrink: 1,
+    gap: 8
+  },
+  reviewBlockCountBadge: {
+    alignItems: 'center',
+    borderRadius: 999,
+    minWidth: 26,
+    paddingHorizontal: 8,
+    paddingVertical: 4
+  },
+  reviewBlockActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 8
+  },
+  reviewBlockChip: {
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
+    padding: 12
+  },
+  reviewBlockList: {
+    gap: 8
+  },
+  reviewBlockPressable: {
+    gap: 8
+  },
+  reviewBlockSourceBadge: {
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 8,
+    paddingVertical: 3
+  },
+  reviewBlockTopRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between'
+  },
+  selectedReviewBlockBanner: {
+    alignItems: 'center',
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    gap: 10,
+    padding: 12
+  },
+  selectedReviewBlockCopy: {
+    flex: 1,
+    gap: 2
   },
   historyAvatar: {
     alignItems: 'center',
@@ -2514,29 +3795,4 @@ const styles = StyleSheet.create({
     gap: 12,
     alignItems: 'center'
   },
-  viewfinderFrame: {
-    aspectRatio: 1.58,
-    borderRadius: 20,
-    borderWidth: 2,
-    maxWidth: 360,
-    opacity: 0.92,
-    width: '82%'
-  },
-  viewfinderPanel: {
-    alignItems: 'center',
-    borderRadius: 18,
-    backgroundColor: 'rgba(0,0,0,0.18)',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    width: '88%'
-  },
-  viewfinderScrim: {
-    alignItems: 'center',
-    bottom: 132,
-    justifyContent: 'center',
-    left: 0,
-    position: 'absolute',
-    right: 0,
-    top: 120
-  }
 });

@@ -11,7 +11,11 @@ const mockUseCameraPermissions = jest.fn();
 const mockTakePictureAsync = jest.fn();
 const mockExtractText = jest.fn();
 const mockPrepareImage = jest.fn();
+const mockUploadCardImage = jest.fn();
+const mockParseCardPreview = jest.fn();
+const mockSaveParsedCard = jest.fn();
 const mockEnqueue = jest.fn();
+const mockRecordHistory = jest.fn();
 const mockRetry = jest.fn();
 const mockDrainOnce = jest.fn();
 const mockGarbageCollect = jest.fn();
@@ -42,8 +46,10 @@ const mockSignInWithPassword = jest.fn();
 const mockSignUp = jest.fn();
 const mockSignInWithOAuth = jest.fn();
 const mockExchangeCodeForSession = jest.fn();
+const mockSetSession = jest.fn();
 const mockSyncScannerQueueStoreNamespace = jest.fn().mockResolvedValue(undefined);
 const mockLoadTeamInboxReview = jest.fn();
+const mockUpdateScannedLeadDetails = jest.fn();
 
 const mockSession = {
   user: {
@@ -53,7 +59,7 @@ const mockSession = {
 };
 
 let mockQueue: Array<{ id: string; status: 'uploading' | 'parsing' | 'failed'; imagePath: string; rawText: string; retryCount: number; error?: string }> = [];
-let mockHistory: Array<{ id: string; imagePath: string; storagePath: string; rawText: string; parseStatus: 'parsed' | 'unparsed'; parsed: { fullName: string | null; jobTitle: string | null; companyName: string | null; email: string | null; phoneNumber: string | null }; savedAt: number }> = [];
+let mockHistory: Array<{ id: string; imagePath: string; storagePath: string; rawText: string; parseStatus: 'parsed' | 'unparsed'; parsed: { address: string | null; fullName: string | null; jobTitle: string | null; companyName: string | null; productServices: string | null; email: string | null; phoneNumber: string | null }; savedAt: number }> = [];
 let mockSystemNotice: null | { kind: 'success' | 'error'; title: string; message: string; createdAt: number } = null;
 
 jest.mock('@react-native-async-storage/async-storage', () =>
@@ -111,12 +117,29 @@ jest.mock('../src/lib/imagePrep', () => ({
   prepareImage: (...args: unknown[]) => mockPrepareImage(...args)
 }));
 
+jest.mock('../src/lib/upload', () => ({
+  uploadCardImage: (...args: unknown[]) => mockUploadCardImage(...args)
+}));
+
+jest.mock('../src/lib/scanCard', () => ({
+  parseCardPreview: (...args: unknown[]) => mockParseCardPreview(...args),
+  saveParsedCard: (...args: unknown[]) => mockSaveParsedCard(...args)
+}));
+
+jest.mock('expo-file-system/legacy', () => ({
+  documentDirectory: 'file:///documents/',
+  makeDirectoryAsync: jest.fn().mockResolvedValue(undefined),
+  deleteAsync: jest.fn().mockResolvedValue(undefined),
+  copyAsync: jest.fn().mockResolvedValue(undefined)
+}));
+
 jest.mock('../src/lib/supabase', () => ({
   supabase: {
     auth: {
       exchangeCodeForSession: (...args: unknown[]) => mockExchangeCodeForSession(...args),
       getSession: (...args: unknown[]) => mockGetSession(...args),
       onAuthStateChange: (...args: unknown[]) => mockOnAuthStateChange(...args),
+      setSession: (...args: unknown[]) => mockSetSession(...args),
       signInWithOAuth: (...args: unknown[]) => mockSignInWithOAuth(...args),
       signInWithPassword: (...args: unknown[]) => mockSignInWithPassword(...args),
       signOut: (...args: unknown[]) => mockSignOut(...args),
@@ -150,6 +173,10 @@ jest.mock('../src/lib/teams', () => ({
 
 jest.mock('../src/lib/teamInbox', () => ({
   loadTeamInboxReview: (...args: unknown[]) => mockLoadTeamInboxReview(...args)
+}));
+
+jest.mock('../src/lib/teamReview', () => ({
+  updateScannedLeadDetails: (...args: unknown[]) => mockUpdateScannedLeadDetails(...args)
 }));
 
 jest.mock('../src/lib/teamInvites', () => ({
@@ -197,6 +224,7 @@ jest.mock('../store/scanner', () => ({
     history: mockHistory,
     systemNotice: mockSystemNotice,
     enqueue: mockEnqueue,
+    recordHistory: mockRecordHistory,
     clearHistory: jest.fn(),
     clearSystemNotice: mockClearSystemNotice,
     retry: mockRetry,
@@ -207,8 +235,20 @@ jest.mock('../store/scanner', () => ({
 jest.mock('react-native-gesture-handler', () => {
   const React = require('react');
   const { View } = require('react-native');
+  const chainableGesture = {
+    onBegin: jest.fn(),
+    onFinalize: jest.fn(),
+    onUpdate: jest.fn()
+  };
+  chainableGesture.onBegin.mockReturnValue(chainableGesture);
+  chainableGesture.onFinalize.mockReturnValue(chainableGesture);
+  chainableGesture.onUpdate.mockReturnValue(chainableGesture);
 
   return {
+    Gesture: {
+      Pan: () => chainableGesture
+    },
+    GestureDetector: ({ children }: { children: React.ReactNode }) => <View>{children}</View>,
     GestureHandlerRootView: ({ children }: { children: React.ReactNode }) => <View>{children}</View>
   };
 });
@@ -260,6 +300,12 @@ async function openCamera(): Promise<void> {
   await act(async () => {
     await Promise.resolve();
   });
+
+  fireEvent.press(screen.getByTestId('single-sided-capture-button'));
+
+  await act(async () => {
+    await Promise.resolve();
+  });
 }
 
 async function renderAppReady(): Promise<void> {
@@ -281,6 +327,7 @@ describe('App permissions flow', () => {
       value: true
     });
     mockUseNetInfo.mockReturnValue({ isConnected: true });
+    jest.spyOn(Linking, 'getInitialURL').mockResolvedValue(null);
     mockGarbageCollect.mockResolvedValue(undefined);
     mockDrainOnce.mockResolvedValue(undefined);
     mockGetActiveTeamId.mockResolvedValue(null);
@@ -309,6 +356,7 @@ describe('App permissions flow', () => {
     ]);
     mockPromoteTeamMemberToLeader.mockResolvedValue(undefined);
     mockUpdateTeamAssignmentState.mockResolvedValue(undefined);
+    mockUpdateScannedLeadDetails.mockResolvedValue(undefined);
     mockListPendingTeamInvitesForEmail.mockResolvedValue([]);
     mockListPendingTeamInvitesForTeam.mockResolvedValue([]);
     mockRespondToTeamInvite.mockResolvedValue(undefined);
@@ -323,6 +371,8 @@ describe('App permissions flow', () => {
     mockAddTeamAssignmentBatchItem.mockResolvedValue(undefined);
     mockRemoveTeamAssignmentBatchItem.mockResolvedValue(undefined);
     mockGetSession.mockResolvedValue({ data: { session: mockSession }, error: null });
+    mockExchangeCodeForSession.mockResolvedValue({ data: { session: mockSession }, error: null });
+    mockSetSession.mockResolvedValue({ data: { session: mockSession }, error: null });
     mockOnAuthStateChange.mockReturnValue({
       data: {
         subscription: {
@@ -332,6 +382,23 @@ describe('App permissions flow', () => {
     });
     mockPrepareImage.mockResolvedValue({ cachePath: 'file:///cache/lead-5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg' });
     mockExtractText.mockResolvedValue('John Doe\nAcme Corp\nSales Manager');
+    mockUploadCardImage.mockResolvedValue('card-images/user-1/5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg');
+    mockParseCardPreview.mockResolvedValue({
+      parseStatus: 'parsed',
+      parsed: {
+        address: null,
+        companyName: 'Acme Corp',
+        email: null,
+        fullName: 'John Doe',
+        jobTitle: 'Sales Manager',
+        productServices: 'Industrial automation',
+        phoneNumber: null
+      }
+    });
+    mockSaveParsedCard.mockImplementation((params: { parsed: unknown }) => Promise.resolve({
+      parseStatus: 'parsed',
+      parsed: params.parsed
+    }));
     mockLoadTeamInboxReview.mockResolvedValue({
       activeTeamId: null,
       teamName: null,
@@ -358,6 +425,43 @@ describe('App permissions flow', () => {
     await renderAppReady();
 
     expect(screen.getByText('Auth screen')).toBeTruthy();
+  });
+
+  it('exchanges an OAuth code callback and opens the signed-in app', async () => {
+    mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+    mockGetSession.mockResolvedValueOnce({ data: { session: null }, error: null });
+    jest.spyOn(Linking, 'getInitialURL').mockResolvedValueOnce('vcscanner://auth/callback?code=oauth-code');
+
+    await renderAppReady();
+
+    await waitFor(() => {
+      expect(mockExchangeCodeForSession).toHaveBeenCalledWith('oauth-code');
+    });
+    await waitFor(() => {
+      expect(mockSyncScannerQueueStoreNamespace).toHaveBeenCalledWith('user-1');
+    });
+    expect(screen.queryByText('Auth screen')).toBeNull();
+    expect(screen.getAllByText('Dashboard').length).toBeGreaterThan(0);
+  });
+
+  it('accepts hash-token OAuth callbacks from implicit auth responses', async () => {
+    mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+    mockGetSession.mockResolvedValueOnce({ data: { session: null }, error: null });
+    jest
+      .spyOn(Linking, 'getInitialURL')
+      .mockResolvedValueOnce('vcscanner://auth/callback#access_token=access-token&refresh_token=refresh-token');
+
+    await renderAppReady();
+
+    await waitFor(() => {
+      expect(mockSetSession).toHaveBeenCalledWith({
+        access_token: 'access-token',
+        refresh_token: 'refresh-token'
+      });
+    });
+    await waitFor(() => {
+      expect(screen.getAllByText('Dashboard').length).toBeGreaterThan(0);
+    });
   });
 
   it('shows a blocking pending-invite gate for signed-in users and resolves on accept', async () => {
@@ -419,6 +523,7 @@ describe('App permissions flow', () => {
     await openCamera();
 
     expect(screen.getByTestId('camera-viewfinder')).toBeTruthy();
+    expect(screen.queryByTestId('card-alignment-frame')).toBeNull();
     expect(screen.getByTestId('capture-button')).toBeTruthy();
     expect(screen.queryByText('Open Settings')).toBeNull();
   });
@@ -430,9 +535,11 @@ describe('App permissions flow', () => {
         id: 'lead-1',
         imagePath: 'file:///cache/lead-1.jpg',
         parsed: {
+          address: null,
           fullName: 'John Doe',
           jobTitle: 'Sales Manager',
           companyName: 'Acme Corp',
+          productServices: 'Industrial automation',
           email: 'john@example.com',
           phoneNumber: null
         },
@@ -448,7 +555,54 @@ describe('App permissions flow', () => {
     expect(screen.getByTestId('history-button')).toBeTruthy();
   });
 
-  it('auto-selects the first accessible team and lets the user switch teams from team', async () => {
+  it('shows personal history and hides team navigation when no team is joined', async () => {
+    mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+    mockLoadTeamInboxReview.mockResolvedValue({
+      activeTeamId: null,
+      teamName: null,
+      mode: 'worker-history',
+      items: []
+    });
+    mockHistory = [
+      {
+        id: 'lead-solo',
+        imagePath: 'file:///documents/history/lead-solo.jpg',
+        parsed: {
+          address: null,
+          companyName: 'Acme',
+          email: 'ada@example.com',
+          fullName: 'Ada Lovelace',
+          jobTitle: 'Engineer',
+          phoneNumber: null,
+          productServices: 'Automation systems'
+        },
+        parseStatus: 'parsed',
+        rawText: 'Ada',
+        savedAt: Date.parse('2026-05-01T12:00:00Z'),
+        storagePath: 'card-images/user-1/lead-solo.jpg'
+      }
+    ];
+
+    await renderAppReady();
+
+    expect(screen.queryByText('Team')).toBeNull();
+
+    fireEvent.press(screen.getAllByText('History')[0]);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(screen.getAllByText('History').length).toBeGreaterThan(0);
+    expect(screen.getByText('My scans')).toBeTruthy();
+    expect(screen.getAllByText('Ada Lovelace').length).toBeGreaterThan(0);
+    expect(screen.getByText('Saved scan')).toBeTruthy();
+    expect(screen.queryByText('Assignments')).toBeNull();
+    expect(screen.queryByText('Assigned to you')).toBeNull();
+    expect(screen.queryByText('Select cards')).toBeNull();
+  });
+
+  it('does not auto-select the first accessible team and lets the user switch teams from team', async () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
     mockLoadAccessibleTeams.mockResolvedValue([
       {
@@ -471,7 +625,7 @@ describe('App permissions flow', () => {
       await Promise.resolve();
     });
 
-    expect(mockSetActiveTeamId).toHaveBeenCalledWith('team-1');
+    expect(mockSetActiveTeamId).not.toHaveBeenCalledWith('team-1');
 
     fireEvent.press(screen.getByText('Team'));
 
@@ -488,7 +642,7 @@ describe('App permissions flow', () => {
       await Promise.resolve();
     });
 
-    expect(mockSetActiveTeamId).toHaveBeenCalledWith('team-2');
+    expect(mockSetActiveTeamId).toHaveBeenCalledWith('team-1');
   });
 
   it('renders the team inbox for leader review mode', async () => {
@@ -510,6 +664,7 @@ describe('App permissions flow', () => {
           jobTitle: 'Engineer',
           parseStatus: 'parsed',
           phoneNumber: null,
+          productServices: 'Automation systems',
           rawText: 'Ada'
         }
       ]
@@ -526,6 +681,65 @@ describe('App permissions flow', () => {
     expect(screen.getByText('Team Inbox')).toBeTruthy();
     expect(screen.getByText('North Hall')).toBeTruthy();
     expect(screen.getAllByText('Ada Lovelace').length).toBeGreaterThan(0);
+  });
+
+  it('lets a leader edit parsed scan details from the team inbox', async () => {
+    mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+    mockLoadTeamInboxReview.mockResolvedValue({
+      activeTeamId: 'team-1',
+      teamName: 'North Hall',
+      mode: 'leader-inbox',
+      items: [
+        {
+          address: 'Pune, Maharashtra',
+          assignedAt: null,
+          assignedToUserId: null,
+          assignmentState: null,
+          teamId: 'team-1',
+          capturedByUserId: 'worker-2',
+          companyName: 'Acme',
+          createdAt: '2026-05-01T12:00:00Z',
+          email: 'ada@example.com',
+          fullName: 'Ada Lovelace',
+          id: 'lead-2',
+          imagePath: 'worker-2/lead-2.jpg',
+          jobTitle: 'Engineer',
+          parseStatus: 'parsed',
+          phoneNumber: null,
+          productServices: 'Automation systems',
+          rawText: 'Ada'
+        }
+      ]
+    });
+
+    await renderAppReady();
+
+    fireEvent.press(screen.getAllByText('History')[0]);
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    fireEvent.press(screen.getByTestId('open-history-item-lead-2'));
+    fireEvent.press(screen.getByTestId('edit-lead-details-button'));
+    fireEvent.changeText(screen.getByTestId('edit-lead-company-name-input'), 'Acme Industries');
+    fireEvent.changeText(screen.getByTestId('edit-lead-full-name-input'), 'Dr. Ada Lovelace');
+    fireEvent.changeText(screen.getByTestId('edit-lead-product-services-input'), 'Automation systems');
+    fireEvent.press(screen.getByTestId('save-lead-details-button'));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockUpdateScannedLeadDetails).toHaveBeenCalledWith('lead-2', {
+      address: 'Pune, Maharashtra',
+      companyName: 'Acme Industries',
+      email: 'ada@example.com',
+      fullName: 'Dr. Ada Lovelace',
+      jobTitle: 'Engineer',
+      phoneNumber: '',
+      productServices: 'Automation systems'
+    });
   });
 
   it('lets a leader create and approve a batch from the team inbox', async () => {
@@ -824,7 +1038,7 @@ describe('App permissions flow', () => {
     expect(screen.getByText(initialMode === 'Dark' ? 'Light' : 'Dark')).toBeTruthy();
   });
 
-  it('creates a team from the team page and then reveals invite and current team sections', async () => {
+  it('creates a team from the profile page and then reveals team features', async () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
     mockCreateTeam.mockResolvedValueOnce({
       createdAt: '2026-05-04T10:00:00Z',
@@ -844,17 +1058,18 @@ describe('App permissions flow', () => {
 
     await renderAppReady();
 
-    fireEvent.press(screen.getByText('Team'));
+    expect(screen.queryByText('Team')).toBeNull();
+
+    fireEvent.press(screen.getByText('Profile'));
 
     await act(async () => {
       await Promise.resolve();
     });
 
-    expect(screen.queryByText('Active team')).toBeNull();
-    expect(screen.queryByText('Pending invite')).toBeNull();
+    expect(screen.getByText('Create your first team')).toBeTruthy();
 
-    fireEvent.changeText(screen.getByTestId('team-name-input'), 'North Hall');
-    fireEvent.press(screen.getByTestId('create-team-button'));
+    fireEvent.changeText(screen.getByTestId('profile-team-name-input'), 'North Hall');
+    fireEvent.press(screen.getByTestId('profile-create-team-button'));
 
     await act(async () => {
       await Promise.resolve();
@@ -863,17 +1078,19 @@ describe('App permissions flow', () => {
 
     expect(mockCreateTeam).toHaveBeenCalledWith('North Hall');
     expect(mockSetActiveTeamId).toHaveBeenCalledWith('team-9');
+
+    fireEvent.press(screen.getByText('Team'));
+
     await waitFor(() => {
       expect(screen.getByText('Active team')).toBeTruthy();
     });
-    await waitFor(() => {
-      expect(screen.getByText('Pending invite')).toBeTruthy();
-    });
-    expect(screen.queryByText('Switch Team')).toBeNull();
+    expect(screen.getByText('Pending invite')).toBeTruthy();
+    expect(screen.queryByText('Create your first team')).toBeNull();
   });
 
   it('sends a team invite from the team page', async () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+    mockGetActiveTeamId.mockResolvedValue('team-1');
     mockLoadAccessibleTeams.mockResolvedValue([
       {
         createdAt: '2026-05-04T10:00:00Z',
@@ -1002,18 +1219,36 @@ describe('App permissions flow', () => {
     });
     expect(mockPrepareImage).toHaveBeenCalledWith('file:///tmp/gallery-card.jpg', leadId);
     expect(mockExtractText).toHaveBeenCalledWith('file:///cache/lead-5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg');
-    expect(screen.getByText('Review scan')).toBeTruthy();
+    expect(mockUploadCardImage).toHaveBeenCalledWith('file:///cache/lead-5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg', leadId);
+    expect(mockParseCardPreview).toHaveBeenCalledWith({
+      teamId: null,
+      imagePath: 'card-images/user-1/5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg',
+      imagePaths: ['card-images/user-1/5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg'],
+      leadId,
+      rawText: 'John Doe\nAcme Corp\nSales Manager'
+    });
+    expect(screen.getByText('Review parsed fields')).toBeTruthy();
 
-    fireEvent.press(screen.getByTestId('save-ocr-review-button'));
+    fireEvent.press(screen.getByTestId('save-parsed-review-button'));
 
     await act(async () => {
       await Promise.resolve();
     });
 
-    expect(mockEnqueue).toHaveBeenCalledWith({
-      teamId: 'team-77',
-      id: leadId,
-      imagePath: 'file:///cache/lead-5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg',
+    expect(mockSaveParsedCard).toHaveBeenCalledWith({
+      teamId: null,
+      imagePath: 'card-images/user-1/5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg',
+      imagePaths: ['card-images/user-1/5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg'],
+      leadId,
+      parsed: {
+        address: null,
+        companyName: 'Acme Corp',
+        email: null,
+        fullName: 'John Doe',
+        jobTitle: 'Sales Manager',
+        productServices: 'Industrial automation',
+        phoneNumber: null
+      },
       rawText: 'John Doe\nAcme Corp\nSales Manager'
     });
   });
@@ -1068,10 +1303,81 @@ describe('App permissions flow', () => {
       await Promise.resolve();
     });
 
-    expect(screen.getByText('Review scan')).toBeTruthy();
+    expect(screen.getByText('Review parsed fields')).toBeTruthy();
   });
 
-  it('runs prepare -> OCR -> review -> enqueue without spinner', async () => {
+  it('captures double-sided cards and parses both sides together', async () => {
+    mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+    mockTakePictureAsync
+      .mockResolvedValueOnce({
+        height: 100,
+        uri: 'file:///tmp/front.jpg',
+        width: 200
+      })
+      .mockResolvedValueOnce({
+        height: 100,
+        uri: 'file:///tmp/back.jpg',
+        width: 200
+      });
+    mockPrepareImage.mockImplementation((uri: string, leadId: string) => Promise.resolve({
+      cachePath: `file:///cache/lead-${leadId}.jpg`
+    }));
+    mockExtractText.mockImplementation((path: string) =>
+      Promise.resolve(path.includes('-back.jpg') ? 'Factory address\nPune' : 'John Doe\nAcme Corp')
+    );
+    mockUploadCardImage.mockImplementation((path: string, leadId: string) =>
+      Promise.resolve(`card-images/user-1/${leadId}.jpg`)
+    );
+
+    const leadId = '5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8';
+    Object.defineProperty(globalThis, 'crypto', {
+      configurable: true,
+      value: {
+        ...(globalThis.crypto ?? {}),
+        randomUUID: jest.fn().mockReturnValue(leadId)
+      }
+    });
+
+    await renderAppReady();
+
+    fireEvent.press(screen.getByTestId('camera-fab'));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    fireEvent.press(screen.getByTestId('double-sided-capture-button'));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    fireEvent.press(screen.getByTestId('capture-button'));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText('Capture back side')).toBeTruthy();
+
+    fireEvent.press(screen.getByTestId('capture-button'));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockParseCardPreview).toHaveBeenCalledWith({
+      imagePath: 'card-images/user-1/5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8-front.jpg',
+      imagePaths: [
+        'card-images/user-1/5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8-front.jpg',
+        'card-images/user-1/5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8-back.jpg'
+      ],
+      leadId,
+      rawText: 'Front side OCR:\nJohn Doe\nAcme Corp\n\nBack side OCR:\nFactory address\nPune',
+      teamId: null
+    });
+    expect(screen.getByText('Review parsed fields')).toBeTruthy();
+  });
+
+  it('runs prepare -> OCR -> parse preview -> reviewed save without spinner', async () => {
     const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(jest.fn());
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
     mockGetActiveTeamId.mockResolvedValue('team-99');
@@ -1101,25 +1407,265 @@ describe('App permissions flow', () => {
 
     expect(mockPrepareImage).toHaveBeenCalledWith('file:///tmp/card.jpg', leadId);
     expect(mockExtractText).toHaveBeenCalledWith('file:///cache/lead-5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg');
-    expect(screen.getByText('Review scan')).toBeTruthy();
+    expect(screen.getByText('Review parsed fields')).toBeTruthy();
     expect(mockEnqueue).not.toHaveBeenCalled();
 
-    fireEvent.press(screen.getByTestId('save-ocr-review-button'));
+    fireEvent.press(screen.getByTestId('save-parsed-review-button'));
 
     await act(async () => {
       await Promise.resolve();
     });
 
-    expect(mockEnqueue).toHaveBeenCalledWith({
-      teamId: 'team-99',
-      id: leadId,
-      imagePath: 'file:///cache/lead-5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg',
+    expect(mockSaveParsedCard).toHaveBeenCalledWith({
+      teamId: null,
+      imagePath: 'card-images/user-1/5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg',
+      imagePaths: ['card-images/user-1/5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg'],
+      leadId,
+      parsed: {
+        address: null,
+        companyName: 'Acme Corp',
+        email: null,
+        fullName: 'John Doe',
+        jobTitle: 'Sales Manager',
+        productServices: 'Industrial automation',
+        phoneNumber: null
+      },
       rawText: 'John Doe\nAcme Corp\nSales Manager'
+    });
+    expect(mockRecordHistory).toHaveBeenCalledWith({
+      id: leadId,
+      imagePath: 'file:///documents/history/lead-5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg',
+      parsed: {
+        address: null,
+        companyName: 'Acme Corp',
+        email: null,
+        fullName: 'John Doe',
+        jobTitle: 'Sales Manager',
+        productServices: 'Industrial automation',
+        phoneNumber: null
+      },
+      parseStatus: 'parsed',
+      rawText: 'John Doe\nAcme Corp\nSales Manager',
+      storagePath: 'card-images/user-1/5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg'
     });
     expect(screen.queryByTestId('pipeline-spinner')).toBeNull();
     expect(screen.queryByTestId('capture-preview')).toBeNull();
-    expect(screen.queryByText('Review scan')).toBeNull();
+    expect(screen.queryByText('Review parsed fields')).toBeNull();
     expect(alertSpy).not.toHaveBeenCalled();
+  });
+
+  it('reenables reviewed save when both save paths fail', async () => {
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(jest.fn());
+    jest.spyOn(console, 'warn').mockImplementation(jest.fn());
+    mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+    mockTakePictureAsync.mockResolvedValue({
+      height: 100,
+      uri: 'file:///tmp/card.jpg',
+      width: 200
+    });
+    mockSaveParsedCard.mockRejectedValue(new Error('network failed'));
+    mockUpdateScannedLeadDetails.mockRejectedValue(new Error('fallback failed'));
+
+    await renderAppReady();
+    await openCamera();
+
+    fireEvent.press(screen.getByTestId('capture-button'));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    fireEvent.press(screen.getByTestId('save-parsed-review-button'));
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(alertSpy).toHaveBeenCalledWith('Save failed', 'Please check your connection and try again.');
+    expect(screen.getByText('Review parsed fields')).toBeTruthy();
+    expect(screen.getByTestId('save-parsed-review-button').props.accessibilityState?.disabled).toBe(false);
+  });
+
+  it('lets the user edit parsed fields before saving', async () => {
+    mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+    mockGetActiveTeamId.mockResolvedValue('team-99');
+    mockTakePictureAsync.mockResolvedValue({
+      height: 100,
+      uri: 'file:///tmp/card.jpg',
+      width: 200
+    });
+
+    const leadId = '5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8';
+    Object.defineProperty(globalThis, 'crypto', {
+      configurable: true,
+      value: {
+        ...(globalThis.crypto ?? {}),
+        randomUUID: jest.fn().mockReturnValue(leadId)
+      }
+    });
+
+    await renderAppReady();
+    await openCamera();
+
+    fireEvent.press(screen.getByTestId('capture-button'));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    fireEvent.changeText(screen.getByTestId('parsed-review-fullName-input'), 'Jane Doe');
+    fireEvent.changeText(screen.getByTestId('parsed-review-companyName-input'), 'Acme Industries');
+    fireEvent.changeText(screen.getByTestId('parsed-review-jobTitle-input'), 'Owner');
+    fireEvent.changeText(screen.getByTestId('parsed-review-productServices-input'), 'Factory automation');
+    fireEvent.press(screen.getByTestId('save-parsed-review-button'));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockSaveParsedCard).toHaveBeenCalledWith({
+      teamId: null,
+      imagePath: 'card-images/user-1/5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg',
+      imagePaths: ['card-images/user-1/5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg'],
+      leadId,
+      parsed: {
+        address: null,
+        companyName: 'Acme Industries',
+        email: null,
+        fullName: 'Jane Doe',
+        jobTitle: 'Owner',
+        productServices: 'Factory automation',
+        phoneNumber: null
+      },
+      rawText: 'John Doe\nAcme Corp\nSales Manager'
+    });
+  });
+
+  it('lets the user move a parsed value block to the correct field before saving', async () => {
+    mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+    mockGetActiveTeamId.mockResolvedValue('team-99');
+    mockTakePictureAsync.mockResolvedValue({
+      height: 100,
+      uri: 'file:///tmp/card.jpg',
+      width: 200
+    });
+    mockParseCardPreview.mockResolvedValue({
+      parseStatus: 'parsed',
+      parsed: {
+        address: null,
+        companyName: null,
+        email: null,
+        fullName: 'Acme Corp',
+        jobTitle: 'Sales Manager',
+        productServices: null,
+        phoneNumber: null
+      }
+    });
+
+    const leadId = '5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8';
+    Object.defineProperty(globalThis, 'crypto', {
+      configurable: true,
+      value: {
+        ...(globalThis.crypto ?? {}),
+        randomUUID: jest.fn().mockReturnValue(leadId)
+      }
+    });
+
+    await renderAppReady();
+    await openCamera();
+
+    fireEvent.press(screen.getByTestId('capture-button'));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    fireEvent.press(screen.getByTestId('review-block-parsed-fullName-0'));
+    fireEvent.press(screen.getByTestId('move-parsed-fullName-0-to-companyName-button'));
+    fireEvent.press(screen.getByTestId('save-parsed-review-button'));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockSaveParsedCard).toHaveBeenCalledWith({
+      teamId: null,
+      imagePath: 'card-images/user-1/5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg',
+      imagePaths: ['card-images/user-1/5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg'],
+      leadId,
+      parsed: {
+        address: null,
+        companyName: 'Acme Corp',
+        email: null,
+        fullName: null,
+        jobTitle: 'Sales Manager',
+        productServices: null,
+        phoneNumber: null
+      },
+      rawText: 'John Doe\nAcme Corp\nSales Manager'
+    });
+  });
+
+  it('updates an already-created preview lead when final reviewed save reports insert failed', async () => {
+    mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+    mockGetActiveTeamId.mockResolvedValue('team-99');
+    mockTakePictureAsync.mockResolvedValue({
+      height: 100,
+      uri: 'file:///tmp/card.jpg',
+      width: 200
+    });
+    mockSaveParsedCard.mockRejectedValue(new Error('Insert failed'));
+    mockUpdateScannedLeadDetails.mockResolvedValue(undefined);
+
+    const leadId = '5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8';
+    Object.defineProperty(globalThis, 'crypto', {
+      configurable: true,
+      value: {
+        ...(globalThis.crypto ?? {}),
+        randomUUID: jest.fn().mockReturnValue(leadId)
+      }
+    });
+
+    await renderAppReady();
+    await openCamera();
+
+    fireEvent.press(screen.getByTestId('capture-button'));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    fireEvent.changeText(screen.getByTestId('parsed-review-companyName-input'), 'Acme Industries');
+    fireEvent.press(screen.getByTestId('save-parsed-review-button'));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(mockUpdateScannedLeadDetails).toHaveBeenCalledWith(leadId, {
+      address: null,
+      companyName: 'Acme Industries',
+      email: null,
+      fullName: 'John Doe',
+      jobTitle: 'Sales Manager',
+      productServices: 'Industrial automation',
+      phoneNumber: null
+    });
+    expect(mockRecordHistory).toHaveBeenCalledWith(expect.objectContaining({
+      id: leadId,
+      parsed: {
+        address: null,
+        companyName: 'Acme Industries',
+        email: null,
+        fullName: 'John Doe',
+        jobTitle: 'Sales Manager',
+        productServices: 'Industrial automation',
+        phoneNumber: null
+      },
+      parseStatus: 'parsed'
+    }));
+    expect(screen.queryByText('Review parsed fields')).toBeNull();
   });
 
   it('continues capture routing without team context when active team lookup fails', async () => {
@@ -1151,16 +1697,26 @@ describe('App permissions flow', () => {
       await Promise.resolve();
     });
 
-    fireEvent.press(screen.getByTestId('save-ocr-review-button'));
+    fireEvent.press(screen.getByTestId('save-parsed-review-button'));
 
     await act(async () => {
       await Promise.resolve();
     });
 
-    expect(mockEnqueue).toHaveBeenCalledWith({
+    expect(mockSaveParsedCard).toHaveBeenCalledWith({
       teamId: null,
-      id: leadId,
-      imagePath: 'file:///cache/lead-5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg',
+      imagePath: 'card-images/user-1/5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg',
+      imagePaths: ['card-images/user-1/5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg'],
+      leadId,
+      parsed: {
+        address: null,
+        companyName: 'Acme Corp',
+        email: null,
+        fullName: 'John Doe',
+        jobTitle: 'Sales Manager',
+        productServices: 'Industrial automation',
+        phoneNumber: null
+      },
       rawText: 'John Doe\nAcme Corp\nSales Manager'
     });
     expect(alertSpy).not.toHaveBeenCalled();

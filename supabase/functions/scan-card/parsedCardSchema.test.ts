@@ -10,6 +10,7 @@ const EMPTY: ParsedCard = {
   fullName: null,
   jobTitle: null,
   companyName: null,
+  productServices: null,
   address: null,
   email: null,
   phoneNumber: null,
@@ -20,6 +21,7 @@ Deno.test("parsedCardSchema: parses well-formed object", () => {
     fullName: "Ada Lovelace",
     jobTitle: "Engineer",
     companyName: "Analytical Engines",
+    productServices: "Mechanical computers",
     address: "1 Engine Way",
     email: "ada@example.com",
     phoneNumber: "+1 111 222 3333",
@@ -29,6 +31,7 @@ Deno.test("parsedCardSchema: parses well-formed object", () => {
     fullName: "Ada Lovelace",
     jobTitle: "Engineer",
     companyName: "Analytical Engines",
+    productServices: "Mechanical computers",
     address: "1 Engine Way",
     email: "ada@example.com",
     phoneNumber: "+1 111 222 3333",
@@ -59,7 +62,7 @@ Deno.test("parsedCardSchema: coerces numeric values to strings", () => {
     ...EMPTY,
     phoneNumber: "1234567890",
   });
-  assertEquals(getParseStatus(parsed), "parsed");
+  assertEquals(getParseStatus(parsed), "unparsed");
 });
 
 Deno.test("parsedCardSchema: missing keys become null", () => {
@@ -91,6 +94,7 @@ Deno.test("parsedCardSchema: drops extra keys", () => {
     "fullName",
     "jobTitle",
     "phoneNumber",
+    "productServices",
   ]);
   assertEquals(getParseStatus(parsed), "parsed");
 });
@@ -100,6 +104,7 @@ Deno.test("parsedCardSchema: all-null payload yields unparsed", () => {
     fullName: null,
     jobTitle: null,
     companyName: null,
+    productServices: null,
     address: null,
     email: null,
     phoneNumber: null,
@@ -107,6 +112,40 @@ Deno.test("parsedCardSchema: all-null payload yields unparsed", () => {
 
   assertEquals(parsed, EMPTY);
   assertEquals(getParseStatus(parsed), "unparsed");
+});
+
+Deno.test("getParseStatus: suspicious company labels need review", () => {
+  assertEquals(
+    getParseStatus({
+      ...EMPTY,
+      companyName: "Corporate Office",
+      fullName: "Prabhat A Deshpande",
+    }),
+    "unparsed",
+  );
+});
+
+Deno.test("getParseStatus: job title in fullName needs review", () => {
+  assertEquals(
+    getParseStatus({
+      ...EMPTY,
+      companyName: "Savemax",
+      fullName: "Owner",
+    }),
+    "unparsed",
+  );
+});
+
+Deno.test("getParseStatus: separated Indian card fields are parsed", () => {
+  assertEquals(
+    getParseStatus({
+      ...EMPTY,
+      companyName: "Savemax",
+      fullName: "Prabhat A Deshpande",
+      jobTitle: "Proprietor",
+    }),
+    "parsed",
+  );
 });
 
 Deno.test("parsedCardSchema: empty object yields all null and unparsed", () => {
@@ -133,6 +172,7 @@ Deno.test(
       fullName: { first: "Ada" },
       jobTitle: true,
       companyName: false,
+      productServices: { category: "Engines" },
       address: { line1: "1 Engine Way" },
       email: { value: "ada@example.com" },
       phoneNumber: { countryCode: "+1", local: "1234567" },

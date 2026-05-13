@@ -1,6 +1,7 @@
 import { loadTeamReview } from './teamReview';
 
 export type TeamInboxItem = {
+  address: string | null;
   assignedToUserId: string | null;
   teamId: string | null;
   assignedAt: string | null;
@@ -15,6 +16,7 @@ export type TeamInboxItem = {
   jobTitle: string | null;
   parseStatus: 'parsed' | 'unparsed';
   phoneNumber: string | null;
+  productServices: string | null;
   rawText: string;
 };
 

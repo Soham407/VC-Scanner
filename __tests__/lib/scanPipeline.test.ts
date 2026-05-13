@@ -66,6 +66,7 @@ describe('scanPipeline', () => {
           email: 'ada@example.com',
           fullName: 'Ada Lovelace',
           jobTitle: 'Engineer',
+          productServices: 'Automation systems',
           phoneNumber: null
         }
       }),
@@ -84,6 +85,7 @@ describe('scanPipeline', () => {
         email: 'ada@example.com',
         fullName: 'Ada Lovelace',
         jobTitle: 'Engineer',
+        productServices: 'Automation systems',
         phoneNumber: null
       },
       parseStatus: 'parsed',

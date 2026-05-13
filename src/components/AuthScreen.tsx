@@ -1,14 +1,11 @@
 import { useState } from 'react';
 import { Alert, KeyboardAvoidingView, Linking, Platform, ScrollView, StyleSheet, View } from 'react-native';
+import * as ExpoLinking from 'expo-linking';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { Button, HelperText, Surface, Text, TextInput } from '../design/openDesign';
-import Animated, {
-  FadeInDown,
-  useAnimatedStyle,
-  useSharedValue,
-  withSpring
-} from 'react-native-reanimated';
+import { Button, Surface, Text, TextInput } from '../design/openDesign';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 
+import { AppLogo } from './AppLogo';
 import { supabase } from '../lib/supabase';
 import { useAppTheme } from '../theme/materialTheme';
 import { motion } from '../theme/motion';
@@ -62,7 +59,7 @@ export function AuthScreen() {
   const [isResettingPassword, setIsResettingPassword] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const redirectTo = 'vcscanner://auth/callback';
+  const redirectTo = ExpoLinking.createURL('auth/callback');
   const isSignUpPasswordMismatch = mode === 'signUp' && confirmPassword.length > 0 && password !== confirmPassword;
 
   const switchMode = (nextMode: AuthMode): void => {
@@ -96,7 +93,10 @@ export function AuthScreen() {
       if (mode === 'signUp') {
         const { data, error } = await supabase.auth.signUp({
           email: trimmedEmail,
-          password
+          password,
+          options: {
+            emailRedirectTo: redirectTo
+          }
         });
 
         if (error) {
@@ -176,98 +176,91 @@ export function AuthScreen() {
       >
         <Animated.View entering={FadeInDown.duration(motion.duration.medium2).easing(motion.easing.emphasized)} style={styles.frame}>
           <Surface elevation={2} style={[styles.panel, { backgroundColor: theme.colors.surfaceContainerHigh }]}>
-            <View style={styles.hero}>
-              <View style={styles.brandRow}>
-                <View style={[styles.brandBadge, { backgroundColor: theme.colors.primaryContainer }]}>
-                  <MaterialCommunityIcons
-                    color={theme.colors.onPrimaryContainer}
-                    name="card-text-outline"
-                    size={18}
-                  />
-                </View>
-                <View>
-                  <Text style={{ color: theme.colors.primary }} variant="labelLarge">
-                    VC Scanner
-                  </Text>
-                  <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
-                    Capture, check, and save business cards.
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.heroCopy}>
-                <Text variant="headlineLarge">Turn cards into contacts.</Text>
-                <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
-                  Sign in once, scan a card, check the details, and keep the contact ready for your team.
+            <View style={[styles.form, { backgroundColor: theme.colors.surfaceContainer }]}>
+              <View style={styles.header}>
+                <AppLogo compact size={72} style={styles.logo} />
+                <Text style={styles.title} variant="headlineMedium">
+                  Welcome back
+                </Text>
+                <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyLarge">
+                  Let's get you started.
                 </Text>
               </View>
 
-              <View style={styles.proofRow}>
-                <AuthProofItem icon="auto-fix" label="Reads cards" />
-                <AuthProofItem icon="cloud-check" label="Saves safely" />
-                <AuthProofItem icon="account-group" label="Team ready" />
-              </View>
-            </View>
-
-            <View style={[styles.form, { backgroundColor: theme.colors.surfaceContainer }]}>
-                <View style={[styles.segmentRow, { backgroundColor: theme.colors.surfaceContainerHighest }]}>
-                <AuthModeButton active={mode === 'signIn'} label="Sign in" onPress={() => switchMode('signIn')} />
-                <AuthModeButton
-                  active={mode === 'signUp'}
-                  label="Create account"
-                  onPress={() => switchMode('signUp')}
-                />
-              </View>
-
               <View style={styles.inputStack}>
-                <TextInput
-                  autoCapitalize="none"
-                  autoComplete="email"
-                  keyboardType="email-address"
-                  label="Email"
-                  mode="outlined"
-                  onChangeText={setEmail}
-                  placeholder="name@company.com"
-                  left={<TextInput.Icon icon="email-outline" />}
-                  value={email}
-                />
+                <View style={styles.fieldGroup}>
+                  <Text style={styles.fieldLabel} variant="bodyMedium">
+                    Email
+                  </Text>
+                  <TextInput
+                    autoCapitalize="none"
+                    autoComplete="email"
+                    keyboardType="email-address"
+                    onChangeText={setEmail}
+                    outlineStyle={[styles.inputBox, { borderColor: theme.colors.outlineVariant }]}
+                    placeholder="example@gmail.com"
+                    value={email}
+                  />
+                </View>
 
-                <TextInput
-                  autoCapitalize="none"
-                  autoComplete="password"
-                  label="Password"
-                  mode="outlined"
-                  onChangeText={setPassword}
-                  placeholder="••••••••"
-                  right={(
-                    <TextInput.Icon
-                      icon={isPasswordHidden ? 'eye-off-outline' : 'eye-outline'}
-                      onPress={() => setIsPasswordHidden((current) => !current)}
-                    />
-                  )}
-                  secureTextEntry={isPasswordHidden}
-                  left={<TextInput.Icon icon="lock-outline" />}
-                  value={password}
-                />
-
-                {mode === 'signUp' ? (
+                <View style={styles.fieldGroup}>
+                  <View style={styles.passwordLabelRow}>
+                    <Text style={styles.fieldLabel} variant="bodyMedium">
+                      Password
+                    </Text>
+                    {mode === 'signIn' ? (
+                      <Button
+                        compact
+                        disabled={isSubmitting || isResettingPassword}
+                        loading={isResettingPassword}
+                        mode="text"
+                        onPress={() => {
+                          void handleForgotPassword();
+                        }}
+                        style={styles.inlineTextButton}
+                      >
+                        Forgot Password ?
+                      </Button>
+                    ) : null}
+                  </View>
                   <TextInput
                     autoCapitalize="none"
                     autoComplete="password"
-                    label="Confirm password"
-                    mode="outlined"
-                    onChangeText={setConfirmPassword}
+                    onChangeText={setPassword}
+                    outlineStyle={[styles.inputBox, { borderColor: theme.colors.outlineVariant }]}
                     placeholder="••••••••"
                     right={(
                       <TextInput.Icon
-                        icon={isConfirmPasswordHidden ? 'eye-off-outline' : 'eye-outline'}
-                        onPress={() => setIsConfirmPasswordHidden((current) => !current)}
+                        icon={isPasswordHidden ? 'eye-off-outline' : 'eye-outline'}
+                        onPress={() => setIsPasswordHidden((current) => !current)}
                       />
                     )}
-                    secureTextEntry={isConfirmPasswordHidden}
-                    left={<TextInput.Icon icon="lock-check-outline" />}
-                    value={confirmPassword}
+                    secureTextEntry={isPasswordHidden}
+                    value={password}
                   />
+                </View>
+
+                {mode === 'signUp' ? (
+                  <View style={styles.fieldGroup}>
+                    <Text style={styles.fieldLabel} variant="bodyMedium">
+                      Confirm password
+                    </Text>
+                    <TextInput
+                      autoCapitalize="none"
+                      autoComplete="password"
+                      onChangeText={setConfirmPassword}
+                      outlineStyle={[styles.inputBox, { borderColor: theme.colors.outlineVariant }]}
+                      placeholder="••••••••"
+                      right={(
+                        <TextInput.Icon
+                          icon={isConfirmPasswordHidden ? 'eye-off-outline' : 'eye-outline'}
+                          onPress={() => setIsConfirmPasswordHidden((current) => !current)}
+                        />
+                      )}
+                      secureTextEntry={isConfirmPasswordHidden}
+                      value={confirmPassword}
+                    />
+                  </View>
                 ) : null}
               </View>
 
@@ -277,11 +270,7 @@ export function AuthScreen() {
                     ? 'Passwords do not match.'
                     : 'Use the same password twice to avoid a typo during account creation.'}
                 </Text>
-              ) : (
-                <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelMedium">
-                  Tip: use the email address you want linked to your saved cards.
-                </Text>
-              )}
+              ) : null}
 
               {errorMessage ? (
                 <View style={[styles.errorBanner, { backgroundColor: theme.colors.errorContainer }]}>
@@ -290,46 +279,30 @@ export function AuthScreen() {
                     {errorMessage}
                   </Text>
                 </View>
-              ) : (
-                <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
-                  Use your demo account, then scan your first card to see the full flow.
-                </Text>
-              )}
-
-              <View style={styles.inlineActions}>
-                <Button
-                  compact
-                  disabled={isSubmitting || isResettingPassword}
-                  loading={isResettingPassword}
-                  mode="text"
-                  onPress={() => {
-                    void handleForgotPassword();
-                  }}
-                >
-                  Forgot password?
-                </Button>
-                <Button
-                  compact
-                  mode="text"
-                  onPress={() => {
-                    switchMode(mode === 'signIn' ? 'signUp' : 'signIn');
-                  }}
-                >
-                  {mode === 'signIn' ? 'Need an account?' : 'Already have one?'}
-                </Button>
-              </View>
+              ) : null}
 
               <View style={styles.actions}>
                 <Button
+                  buttonColor={theme.colors.primary}
                   contentStyle={styles.buttonContent}
                   disabled={isSubmitting || isResettingPassword}
+                  labelStyle={styles.primaryActionLabel}
                   loading={isSubmitting}
                   mode="contained"
                   onPress={handlePasswordAuth}
+                  textColor={theme.colors.surface}
                   style={styles.primaryAction}
                 >
-                  {mode === 'signUp' ? 'Create account' : 'Sign in'}
+                  {mode === 'signUp' ? 'Create account' : 'Login'}
                 </Button>
+
+                <View style={styles.dividerRow}>
+                  <View style={[styles.dividerLine, { backgroundColor: theme.colors.outlineVariant }]} />
+                  <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
+                    Or
+                  </Text>
+                  <View style={[styles.dividerLine, { backgroundColor: theme.colors.outlineVariant }]} />
+                </View>
 
                 <Button
                   icon={() => (
@@ -340,10 +313,29 @@ export function AuthScreen() {
                   contentStyle={styles.buttonContent}
                   disabled={isSubmitting || isResettingPassword}
                   loading={isSubmitting}
-                  mode="contained-tonal"
+                  mode="outlined"
                   onPress={handleGoogleAuth}
+                  style={styles.googleAction}
+                  textColor={theme.colors.onSurface}
                 >
-                  Continue with Google
+                  Login with google
+                </Button>
+              </View>
+
+              <View style={styles.accountRow}>
+                <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
+                  {mode === 'signIn' ? "Don't have an account ?" : 'Already have an account ?'}
+                </Text>
+                <Button
+                  compact
+                  labelStyle={[styles.accountActionLabel, { color: theme.colors.primary }]}
+                  mode="text"
+                  onPress={() => {
+                    switchMode(mode === 'signIn' ? 'signUp' : 'signIn');
+                  }}
+                  style={styles.accountAction}
+                >
+                  {mode === 'signIn' ? 'Sign Up' : 'Login'}
                 </Button>
               </View>
             </View>
@@ -354,156 +346,118 @@ export function AuthScreen() {
   );
 }
 
-function AuthModeButton({
-  active,
-  label,
-  onPress
-}: {
-  active: boolean;
-  label: string;
-  onPress: () => void;
-}) {
-  const pressProgress = useSharedValue(0);
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [
-      {
-        scale: withSpring(pressProgress.value ? 0.98 : 1, motion.spring.fastEffects)
-      }
-    ]
-  }));
-
-  return (
-    <Animated.View style={[styles.segmentButtonWrap, animatedStyle]}>
-      <Button
-        compact
-        mode={active ? 'contained' : 'text'}
-        onPress={onPress}
-        onPressIn={() => {
-          pressProgress.value = 1;
-        }}
-        onPressOut={() => {
-          pressProgress.value = 0;
-        }}
-        style={styles.segmentButton}
-      >
-        {label}
-      </Button>
-    </Animated.View>
-  );
-}
-
 const styles = StyleSheet.create({
+  accountAction: {
+    minHeight: 28
+  },
+  accountActionLabel: {
+    fontSize: 14
+  },
+  accountRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 2,
+    justifyContent: 'center'
+  },
   actions: {
-    gap: 12
+    gap: 14
   },
   buttonContent: {
+    minHeight: 44,
     paddingVertical: 6
+  },
+  dividerLine: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth
+  },
+  dividerRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    paddingVertical: 8
   },
   errorBanner: {
     alignItems: 'flex-start',
-    borderRadius: 18,
+    borderRadius: 8,
     flexDirection: 'row',
     gap: 10,
     paddingHorizontal: 14,
     paddingVertical: 12
   },
+  fieldGroup: {
+    gap: 8
+  },
+  fieldLabel: {
+    fontWeight: '500'
+  },
   form: {
-    borderRadius: 28,
-    gap: 16,
-    padding: 18
+    gap: 20,
+    padding: 24,
+    paddingBottom: 28,
+    paddingTop: 52
   },
   container: {
     flexGrow: 1,
     justifyContent: 'center',
-    padding: 16
+    padding: 20
   },
   googleLogoWrap: {
     alignItems: 'center',
     justifyContent: 'center'
   },
-  brandBadge: {
-    alignItems: 'center',
-    borderRadius: 10,
-    height: 28,
-    justifyContent: 'center',
-    width: 28
+  googleAction: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#D8DEE4',
+    borderRadius: 8
   },
-  brandRow: {
+  header: {
     alignItems: 'center',
-    flexDirection: 'row',
-    gap: 10
+    gap: 6,
+    marginBottom: 24
   },
   frame: {
     alignSelf: 'center',
-    maxWidth: 560,
+    maxWidth: 430,
     width: '100%'
   },
-  heroCopy: {
-    gap: 10
-  },
-  hero: {
-    gap: 18,
-    padding: 18,
-    paddingBottom: 20
-  },
   inputStack: {
-    gap: 12
+    gap: 18
   },
-  inlineActions: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    marginTop: -4
+  inlineTextButton: {
+    minHeight: 24
+  },
+  inputBox: {
+    borderBottomWidth: 1,
+    borderRadius: 12,
+    borderWidth: 1,
+    minHeight: 58,
+    paddingHorizontal: 20,
+    paddingVertical: 8
   },
   panel: {
-    borderRadius: 32,
-    gap: 0
+    borderRadius: 36,
+    gap: 0,
+    overflow: 'hidden'
   },
-  segmentButton: {
-    flex: 1
-  },
-  segmentButtonWrap: {
-    flex: 1
-  },
-  segmentRow: {
-    borderRadius: 20,
-    flexDirection: 'row',
-    gap: 8,
-    padding: 4
-  },
-  proofRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10
-  },
-  proofPill: {
+  passwordLabelRow: {
     alignItems: 'center',
-    borderRadius: 999,
     flexDirection: 'row',
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10
+    justifyContent: 'space-between'
   },
   primaryAction: {
+    borderRadius: 8,
     marginTop: 2
+  },
+  primaryActionLabel: {
+    fontSize: 16,
+    fontWeight: '800'
+  },
+  title: {
+    fontFamily: undefined,
+    fontWeight: '800'
+  },
+  logo: {
+    marginBottom: 8
   }
 });
-
-function AuthProofItem({
-  icon,
-  label
-}: {
-  icon: keyof typeof MaterialCommunityIcons.glyphMap;
-  label: string;
-}) {
-  const theme = useAppTheme();
-
-  return (
-    <View style={[styles.proofPill, { backgroundColor: theme.colors.surfaceContainer }]}>
-      <MaterialCommunityIcons color={theme.colors.primary} name={icon} size={16} />
-      <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelLarge">
-        {label}
-      </Text>
-    </View>
-  );
-}

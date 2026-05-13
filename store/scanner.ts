@@ -54,6 +54,7 @@ type ScannerQueueStoreOptions = {
 
 const STORAGE_PREFIX = 'scanner-queue';
 let storageNamespace = 'signed-out';
+let isPersistenceSuppressed = false;
 
 function getNamespacedStorageKey(name: string): string {
   return `${STORAGE_PREFIX}:${storageNamespace}:${name}`;
@@ -62,7 +63,13 @@ function getNamespacedStorageKey(name: string): string {
 const namespacedAsyncStorage = {
   getItem: async (name: string) => AsyncStorage.getItem(getNamespacedStorageKey(name)),
   removeItem: async (name: string) => AsyncStorage.removeItem(getNamespacedStorageKey(name)),
-  setItem: async (name: string, value: string) => AsyncStorage.setItem(getNamespacedStorageKey(name), value)
+  setItem: async (name: string, value: string) => {
+    if (isPersistenceSuppressed) {
+      return;
+    }
+
+    return AsyncStorage.setItem(getNamespacedStorageKey(name), value);
+  }
 };
 
 function createScannerQueueState(pipeline: ReturnType<typeof createScanPipeline>) {
@@ -124,7 +131,7 @@ function createScannerQueueState(pipeline: ReturnType<typeof createScanPipeline>
             savedAt: item.savedAt ?? Date.now()
           },
           ...state.history.filter((existing) => existing.id !== item.id)
-        ].slice(0, 10)
+        ]
       }));
     },
     markFailed: (id, error) => {
@@ -208,12 +215,20 @@ export function createScannerQueueStore(
 export const scannerQueueStore = createScannerQueueStore({}, { skipHydration: true });
 
 export async function syncScannerQueueStoreNamespace(userId: string | null): Promise<void> {
-  storageNamespace = userId && userId.trim().length > 0 ? userId : 'signed-out';
-  scannerQueueStore.setState({
-    history: [],
-    queue: [],
-    systemNotice: null
-  });
+  const nextNamespace = userId && userId.trim().length > 0 ? userId : 'signed-out';
+
+  isPersistenceSuppressed = true;
+  try {
+    scannerQueueStore.setState({
+      history: [],
+      queue: [],
+      systemNotice: null
+    });
+  } finally {
+    isPersistenceSuppressed = false;
+  }
+
+  storageNamespace = nextNamespace;
 
   if (userId) {
     await scannerQueueStore.persist.rehydrate();

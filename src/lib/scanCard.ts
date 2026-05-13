@@ -4,6 +4,7 @@ export type ParsedCard = {
   fullName: string | null;
   jobTitle: string | null;
   companyName: string | null;
+  productServices: string | null;
   address: string | null;
   email: string | null;
   phoneNumber: string | null;
@@ -14,8 +15,13 @@ export type ParseStatus = 'parsed' | 'unparsed';
 type InvokeScanCardParams = {
   rawText: string;
   imagePath: string;
+  imagePaths?: string[];
   leadId: string;
   teamId?: string | null;
+};
+
+type SaveParsedCardParams = InvokeScanCardParams & {
+  parsed: ParsedCard;
 };
 
 export type InvokeScanCardResponse = {
@@ -42,6 +48,32 @@ export class ScanCardInvokeError extends Error {
     this.name = 'ScanCardInvokeError';
     this.status = status;
   }
+}
+
+async function invokeScanCardFunction(body: Record<string, unknown>): Promise<InvokeScanCardResponse> {
+  const { data, error } = await supabase.functions.invoke<ScanCardFunctionSuccess | ScanCardFunctionFailure>(
+    'scan-card',
+    {
+      body
+    }
+  );
+
+  if (error) {
+    const detailMessage = await extractErrorMessage(error);
+    throw new ScanCardInvokeError(detailMessage ?? error.message, getInvokeErrorStatus(error));
+  }
+
+  if (!data || !('ok' in data) || data.ok !== true) {
+    const errorMessage = data && 'error' in data && typeof data.error === 'string'
+      ? data.error
+      : 'scan-card invocation failed';
+    throw new ScanCardInvokeError(errorMessage);
+  }
+
+  return {
+    parseStatus: data.parseStatus,
+    parsed: data.parsed
+  };
 }
 
 async function extractErrorMessage(error: unknown): Promise<string | undefined> {
@@ -147,32 +179,35 @@ function getInvokeErrorStatus(error: unknown): number | undefined {
 }
 
 export async function invokeScanCard(params: InvokeScanCardParams): Promise<InvokeScanCardResponse> {
-  const { data, error } = await supabase.functions.invoke<ScanCardFunctionSuccess | ScanCardFunctionFailure>(
-    'scan-card',
-    {
-      body: {
-        teamId: params.teamId ?? null,
-        imagePath: params.imagePath,
-        leadId: params.leadId,
-        rawText: params.rawText
-      }
-    }
-  );
+  return invokeScanCardFunction({
+    action: 'save',
+    teamId: params.teamId ?? null,
+    imagePath: params.imagePath,
+    ...(params.imagePaths ? { imagePaths: params.imagePaths } : {}),
+    leadId: params.leadId,
+    rawText: params.rawText
+  });
+}
 
-  if (error) {
-    const detailMessage = await extractErrorMessage(error);
-    throw new ScanCardInvokeError(detailMessage ?? error.message, getInvokeErrorStatus(error));
-  }
+export async function parseCardPreview(params: InvokeScanCardParams): Promise<InvokeScanCardResponse> {
+  return invokeScanCardFunction({
+    action: 'parse',
+    teamId: params.teamId ?? null,
+    imagePath: params.imagePath,
+    ...(params.imagePaths ? { imagePaths: params.imagePaths } : {}),
+    leadId: params.leadId,
+    rawText: params.rawText
+  });
+}
 
-  if (!data || !('ok' in data) || data.ok !== true) {
-    const errorMessage = data && 'error' in data && typeof data.error === 'string'
-      ? data.error
-      : 'scan-card invocation failed';
-    throw new ScanCardInvokeError(errorMessage);
-  }
-
-  return {
-    parseStatus: data.parseStatus,
-    parsed: data.parsed
-  };
+export async function saveParsedCard(params: SaveParsedCardParams): Promise<InvokeScanCardResponse> {
+  return invokeScanCardFunction({
+    action: 'saveParsed',
+    teamId: params.teamId ?? null,
+    imagePath: params.imagePath,
+    ...(params.imagePaths ? { imagePaths: params.imagePaths } : {}),
+    leadId: params.leadId,
+    parsed: params.parsed,
+    rawText: params.rawText
+  });
 }

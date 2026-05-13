@@ -15,6 +15,7 @@ import { type OcrStatus, StatusChip } from './StatusChip';
 type ScanHeroCardProps = {
   activeTeamName: string | null;
   failedCount: number;
+  hasTeamWorkspace: boolean;
   inFlightCount: number;
   savedCount: number;
   status: OcrStatus;
@@ -67,6 +68,7 @@ function MotionButton({
 export function ScanHeroCard({
   activeTeamName,
   failedCount,
+  hasTeamWorkspace,
   inFlightCount,
   onOpenCamera,
   onOpenHistory,
@@ -89,7 +91,7 @@ export function ScanHeroCard({
         <View style={styles.copy}>
           <View style={styles.kickerRow}>
             <Text style={[styles.kicker, { color: theme.colors.primary }]} variant="labelSmall">
-              {activeTeamName ? `${activeTeamName} · active team` : 'Choose a team'}
+              {activeTeamName ? `${activeTeamName} · active team` : hasTeamWorkspace ? 'No active team' : 'Personal scans'}
             </Text>
             <View style={styles.badgeRow}>
               <View style={[styles.badge, { backgroundColor: theme.colors.surfaceContainerHighest }]}>
@@ -104,16 +106,20 @@ export function ScanHeroCard({
             Scan a business card
           </Text>
           <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
-            Take a photo, check the details, and send the card to the right team member.
+            {activeTeamName
+              ? 'Take a photo, check the details, and send the card to the right team member.'
+              : 'Take a photo, check the details, and save the card to your account.'}
           </Text>
-          <View style={[styles.alert, { backgroundColor: theme.colors.surfaceContainer }]}>
-            <Text style={{ color: theme.colors.onSurface }} variant="labelLarge">
-              New cards stay in the team inbox first.
-            </Text>
-            <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }} variant="bodySmall">
-              Team leads can review and assign them when ready.
-            </Text>
-          </View>
+          {activeTeamName ? (
+            <View style={[styles.alert, { backgroundColor: theme.colors.surfaceContainer }]}>
+              <Text style={{ color: theme.colors.onSurface }} variant="labelLarge">
+                New cards stay in the team inbox first.
+              </Text>
+              <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }} variant="bodySmall">
+                Team leads can review and assign them when ready.
+              </Text>
+            </View>
+          ) : null}
           <View style={styles.pipelineRow}>
             <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelMedium">
               {savedCount} saved
@@ -129,10 +135,10 @@ export function ScanHeroCard({
           </View>
           <View style={styles.actions}>
             <MotionButton icon="camera" mode="contained" onPress={onOpenCamera} testID="dashboard-scan-button">
-              {activeTeamName ? 'Scan now' : 'Choose team'}
+              Scan now
             </MotionButton>
             <MotionButton icon="history" mode="outlined" onPress={onOpenHistory} testID="history-button">
-              View inbox
+              View history
             </MotionButton>
           </View>
         </View>

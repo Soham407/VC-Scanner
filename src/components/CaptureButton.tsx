@@ -12,10 +12,11 @@ import { motion } from '../theme/motion';
 type CaptureButtonProps = {
   disabled: boolean;
   onCapture: (uri: string) => void;
+  placement?: 'bottom' | 'right';
   takePicture: () => Promise<string | null>;
 };
 
-export function CaptureButton({ disabled, onCapture, takePicture }: CaptureButtonProps): JSX.Element {
+export function CaptureButton({ disabled, onCapture, placement = 'bottom', takePicture }: CaptureButtonProps): JSX.Element {
   const theme = useAppTheme();
   const pressProgress = useSharedValue(0);
 
@@ -40,7 +41,13 @@ export function CaptureButton({ disabled, onCapture, takePicture }: CaptureButto
   };
 
   return (
-    <Animated.View style={[styles.captureButtonAnchor, animatedStyle]}>
+    <Animated.View
+      style={[
+        styles.captureButtonAnchor,
+        placement === 'right' ? styles.captureButtonAnchorRight : styles.captureButtonAnchorBottom,
+        animatedStyle
+      ]}
+    >
       <Pressable
         accessibilityLabel="Capture business card"
         accessibilityRole="button"
@@ -89,9 +96,16 @@ const styles = StyleSheet.create({
     width: 80
   },
   captureButtonAnchor: {
-    alignSelf: 'center',
-    bottom: 32,
     position: 'absolute'
+  },
+  captureButtonAnchorBottom: {
+    alignSelf: 'center',
+    bottom: 32
+  },
+  captureButtonAnchorRight: {
+    marginTop: -44,
+    right: 28,
+    top: '50%'
   },
   captureButtonDisabled: {
     opacity: 0.45
