@@ -6,9 +6,11 @@
   --ink: #171717;
   --muted: #5f6873;
   --line: #d9dfe7;
-  --accent: #1c5d5b;
-  --accent-2: #d85f3d;
-  --shadow: 0 18px 50px rgba(23, 23, 23, 0.08);
+  --accent: #4a5b00;
+  --accent-2: #315d86;
+  --primary: #a8d800;
+  --primary-soft: #e6f4a6;
+  --shadow: 0 18px 45px rgba(15, 27, 42, 0.08);
 }
 
 * {
@@ -54,29 +56,33 @@ textarea {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-columns: 300px minmax(0, 1fr);
   min-height: 100vh;
 }
 
 .sidebar {
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
-  padding: 1.25rem;
+  gap: 1rem;
+  padding: 1rem;
   border-right: 1px solid var(--line);
-  background: rgba(255,255,255,0.55);
-  backdrop-filter: blur(14px);
+  background: linear-gradient(180deg, rgba(255,255,255,0.92), rgba(242,245,247,0.78));
+  backdrop-filter: blur(18px);
+  position: sticky;
+  top: 0;
+  height: 100vh;
 }
 
 .workspace {
   min-width: 0;
-  padding: 1.5rem;
+  padding: 1.75rem;
 }
 
 .brand {
   display: flex;
   gap: 0.85rem;
   align-items: center;
+  padding: 0.35rem 0.4rem;
 }
 
 .brand-mark {
@@ -85,13 +91,14 @@ textarea {
   width: 44px;
   height: 44px;
   border-radius: 8px;
-  background: var(--ink);
-  color: white;
-  font-weight: 700;
+  background: var(--primary);
+  color: #111719;
+  font-weight: 900;
+  box-shadow: inset 0 -1px 0 rgba(17, 23, 25, 0.14);
 }
 
 .brand strong, .topbar h1, h2 {
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
 }
 
 .brand small, .muted, .success-text, .error-text {
@@ -100,7 +107,21 @@ textarea {
 
 .nav {
   display: grid;
-  gap: 0.4rem;
+  gap: 1rem;
+  margin-top: 0.25rem;
+}
+
+.nav-group {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.nav-label {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  padding: 0 0.8rem;
+  text-transform: uppercase;
 }
 
 .nav-item, .ghost-button, .primary-button, .google-button, .card-button {
@@ -115,14 +136,17 @@ textarea {
 
 .nav-item {
   justify-content: flex-start;
-  padding: 0.75rem 0.9rem;
+  min-height: 44px;
+  padding: 0.75rem 0.85rem;
   color: var(--muted);
+  font-weight: 700;
 }
 
 .nav-item.active {
   color: var(--ink);
-  background: rgba(28, 93, 91, 0.08);
-  border-color: rgba(28, 93, 91, 0.16);
+  background: var(--primary-soft);
+  border-color: rgba(74, 91, 0, 0.22);
+  box-shadow: 0 10px 28px rgba(74, 91, 0, 0.1);
 }
 
 .primary-button {
@@ -144,9 +168,12 @@ textarea {
 
 .topbar {
   display: flex;
-  align-items: end;
+  align-items: center;
   justify-content: space-between;
+  gap: 1rem;
   margin-bottom: 1.5rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid var(--line);
 }
 
 .topbar h1, h2 {
@@ -160,6 +187,22 @@ textarea {
   font-size: 0.72rem;
   color: var(--accent);
   font-weight: 700;
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.role-pill {
+  border: 1px solid rgba(74, 91, 0, 0.22);
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: #2f3a00;
+  font-size: 0.78rem;
+  font-weight: 800;
+  padding: 0.45rem 0.7rem;
 }
 
 .page-stack, .stack {
@@ -251,6 +294,10 @@ textarea {
   justify-content: space-between;
 }
 
+.lead-row {
+  padding: 1rem 1.1rem;
+}
+
 .lead-badge {
   width: 44px;
   height: 44px;
@@ -303,6 +350,126 @@ textarea {
   border-radius: 8px;
   box-shadow: var(--shadow);
   padding: 2rem;
+}
+
+.workspace-card,
+.user-card {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.workspace-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 0.85rem;
+  box-shadow: var(--shadow);
+}
+
+.workspace-card strong,
+.user-card strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-label {
+  display: block;
+  color: var(--muted);
+  font-size: 0.74rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.user-avatar {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex: none;
+  border-radius: 8px;
+  background: #111719;
+  color: white;
+  font-weight: 900;
+}
+
+.user-avatar.small {
+  width: 32px;
+  height: 32px;
+  font-size: 0.82rem;
+}
+
+.sidebar-footer {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: auto;
+}
+
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.metric-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 1rem;
+  box-shadow: var(--shadow);
+}
+
+.metric-card span {
+  color: var(--muted);
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.metric-card strong {
+  display: block;
+  font-size: 2rem;
+  line-height: 1;
+  margin-top: 0.45rem;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  justify-content: space-between;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 0.65rem;
+  box-shadow: var(--shadow);
+}
+
+.search-box {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex: 1;
+  min-width: 0;
+  color: var(--muted);
+  padding-left: 0.45rem;
+}
+
+.search-box input {
+  border: 0;
+  padding: 0.55rem 0.4rem;
+}
+
+.result-count {
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 700;
+  padding: 0 0.55rem;
+  white-space: nowrap;
 }
 
 .google-button {
@@ -382,9 +549,70 @@ textarea {
   .sidebar {
     border-right: 0;
     border-bottom: 1px solid var(--line);
+    height: auto;
+    position: static;
+  }
+
+  .nav {
+    display: flex;
+    gap: 0.75rem;
+    overflow-x: auto;
+    padding-bottom: 0.2rem;
+  }
+
+  .nav-group {
+    min-width: max-content;
+  }
+
+  .nav-item {
+    min-width: 150px;
+  }
+
+  .sidebar-footer {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .topbar {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .two-col {
     grid-template-columns: 1fr;
+  }
+
+  .metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  .workspace {
+    padding: 1rem;
+  }
+
+  .metric-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .toolbar,
+  .lead-row,
+  .mini-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .lead-row {
+    position: relative;
+  }
+
+  .lead-row .ghost-button {
+    width: 100%;
+  }
+
+  .topbar-actions {
+    width: 100%;
+    justify-content: space-between;
   }
 }
