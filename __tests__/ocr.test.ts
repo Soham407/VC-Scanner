@@ -1,4 +1,4 @@
-import { BlurryImageError, extractText } from '../lib/ocr';
+import { BlurryImageError, extractText, normalizeOcrText } from '../lib/ocr';
 
 const mockRecognize = jest.fn();
 
@@ -33,5 +33,11 @@ describe('extractText', () => {
     });
 
     await expect(extractText('file:///tmp/blurry.jpg')).rejects.toBeInstanceOf(BlurryImageError);
+  });
+
+  it('normalizes noisy OCR symbols and duplicate lines', () => {
+    expect(normalizeOcrText('  ● John   Doe  \n____\nAcme || Industries\nACME || INDUSTRIES\nPune - 411001  ')).toBe(
+      'John Doe\nAcme Industries\nPune - 411001'
+    );
   });
 });

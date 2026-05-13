@@ -13,10 +13,13 @@ const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY");
 const STORAGE_BUCKET = "card-images";
 
 const requestSchema = z.object({
+  action: z.enum(["parse", "save", "saveParsed"]).optional(),
   rawText: z.string().min(1),
   imagePath: z.string().min(1),
+  imagePaths: z.array(z.string().min(1)).min(1).max(2).optional(),
   leadId: z.string().uuid(),
   teamId: z.string().uuid().nullable().optional(),
+  parsed: z.unknown().optional(),
 });
 
 type ErrorPayload = {
@@ -87,6 +90,26 @@ function getErrorMessage(error: unknown): string {
   return "Internal server error";
 }
 
+async function parseCardFromImage(params: {
+  apiKey: string;
+  imageBlobs: Blob[];
+  rawText: string;
+}): Promise<ReturnType<typeof coerceParsedCard>> {
+  const imageDataUrls = await Promise.all(
+    params.imageBlobs.map(async (imageBlob) => {
+      const imageBase64 = arrayBufferToBase64(await imageBlob.arrayBuffer());
+      return `data:${imageBlob.type || "image/jpeg"};base64,${imageBase64}`;
+    }),
+  );
+  const llmPayload = await createJsonCompletion({
+    apiKey: params.apiKey,
+    rawText: params.rawText,
+    imageDataUrls,
+  });
+
+  return coerceParsedCard(llmPayload);
+}
+
 Deno.serve(async (req) => {
   if (req.method !== "POST") {
     return jsonResponse({ ok: false, error: "Method not allowed" }, 405);
@@ -112,7 +135,7 @@ Deno.serve(async (req) => {
   try {
     const supabaseUrl = requireEnv("SUPABASE_URL", SUPABASE_URL);
     const supabaseAnonKey = requireEnv("SUPABASE_ANON_KEY", SUPABASE_ANON_KEY);
-    const groqApiKey = requireEnv("GROQ_API_KEY", GROQ_API_KEY);
+    const action = bodyResult.data.action ?? "save";
 
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       global: {
@@ -127,24 +150,53 @@ Deno.serve(async (req) => {
       return jsonResponse({ ok: false, error: "Unauthorized" }, 401);
     }
 
-    const downloadPath = normalizeStoragePath(bodyResult.data.imagePath);
-    const { data: imageBlob, error: downloadError } = await supabase.storage
-      .from(STORAGE_BUCKET)
-      .download(downloadPath);
+    const requestedImagePaths = bodyResult.data.imagePaths ?? [
+      bodyResult.data.imagePath,
+    ];
+    const downloadPaths = requestedImagePaths.map(normalizeStoragePath);
+    const downloadPath = downloadPaths[0];
+    const secondaryDownloadPath = downloadPaths[1] ?? null;
+    let parsed = bodyResult.data.parsed === undefined
+      ? null
+      : coerceParsedCard(bodyResult.data.parsed);
 
-    if (downloadError || !imageBlob) {
-      return jsonResponse({ ok: false, error: "Image download failed" }, 500);
+    if (action !== "saveParsed") {
+      const groqApiKey = requireEnv("GROQ_API_KEY", GROQ_API_KEY);
+      const imageBlobs: Blob[] = [];
+
+      for (const path of downloadPaths) {
+        const { data: imageBlob, error: downloadError } = await supabase.storage
+          .from(STORAGE_BUCKET)
+          .download(path);
+
+        if (downloadError || !imageBlob) {
+          return jsonResponse({ ok: false, error: "Image download failed" }, 500);
+        }
+
+        imageBlobs.push(imageBlob);
+      }
+
+      parsed = await parseCardFromImage({
+        apiKey: groqApiKey,
+        imageBlobs,
+        rawText: bodyResult.data.rawText,
+      });
     }
 
-    const imageBase64 = arrayBufferToBase64(await imageBlob.arrayBuffer());
-    const llmPayload = await createJsonCompletion({
-      apiKey: groqApiKey,
-      rawText: bodyResult.data.rawText,
-      imageDataUrl: `data:${imageBlob.type || "image/jpeg"};base64,${imageBase64}`,
-    });
+    if (!parsed) {
+      return jsonResponse({ ok: false, error: "Missing parsed card" }, 400);
+    }
 
-    const parsed = coerceParsedCard(llmPayload);
     const parseStatus = getParseStatus(parsed);
+
+    if (action === "parse") {
+      return jsonResponse({
+        ok: true,
+        leadId: bodyResult.data.leadId,
+        parsed,
+        parseStatus,
+      });
+    }
 
     const dbFields = mapToDb(parsed);
 
@@ -156,6 +208,7 @@ Deno.serve(async (req) => {
         team_id: bodyResult.data.teamId ?? null,
         ...dbFields,
         image_url: downloadPath,
+        secondary_image_url: secondaryDownloadPath,
         raw_ocr_text: bodyResult.data.rawText,
         parse_status: parseStatus,
       });

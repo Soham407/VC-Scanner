@@ -24,10 +24,12 @@ import {
 } from '../lib/teamInvites';
 import { loadTeamMembers, promoteTeamMemberToLeader, type TeamMember } from '../lib/teamMembers';
 import { updateTeamAssignmentState } from '../lib/teamAssignments';
+import { updateScannedLeadDetails, type ScannedLeadDetailsUpdate } from '../lib/teamReview';
 
 export type TeamWorkspaceState = {
   activeTeamId: string | null;
   activeTeamName: string | null;
+  hasTeamWorkspace: boolean;
   teams: AccessibleTeam[];
   createTeam: (teamName: string) => Promise<void>;
   createBatch: () => void;
@@ -55,6 +57,7 @@ export type TeamWorkspaceState = {
   addBatchItem: (scannedLeadId: string) => Promise<void>;
   removeBatchItem: (scannedLeadId: string) => Promise<void>;
   promoteMember: (userId: string) => Promise<void>;
+  updateLeadDetails: (scannedLeadId: string, updates: ScannedLeadDetailsUpdate) => Promise<void>;
   updateAssignmentState: (scannedLeadId: string, assignmentState: AssignmentState) => Promise<void>;
   reassignAssignment: (scannedLeadId: string, targetUserId: string) => Promise<void>;
   respondToInvite: (decision: 'accept' | 'decline') => Promise<void>;
@@ -129,13 +132,15 @@ export function useTeamWorkspace(session: Session | null | undefined): TeamWorks
         getActiveTeamId()
       ]);
 
-      setTeams(nextTeams);
-      setActiveTeamIdState(nextActiveTeamId);
+      const validActiveTeamId = nextTeams.some((team) => team.id === nextActiveTeamId)
+        ? nextActiveTeamId
+        : null;
 
-      if (!nextActiveTeamId && nextTeams.length > 0) {
-        const fallbackTeamId = nextTeams[0].id;
-        await setActiveTeamId(fallbackTeamId);
-        setActiveTeamIdState(fallbackTeamId);
+      setTeams(nextTeams);
+      setActiveTeamIdState(validActiveTeamId);
+
+      if (nextActiveTeamId && !validActiveTeamId) {
+        await setActiveTeamId(null);
       }
     } catch (error) {
       console.warn('Team directory load failed', error);
@@ -400,6 +405,14 @@ export function useTeamWorkspace(session: Session | null | undefined): TeamWorks
     [refreshHistory]
   );
 
+  const updateLead = useCallback(
+    async (scannedLeadId: string, updates: ScannedLeadDetailsUpdate): Promise<void> => {
+      await updateScannedLeadDetails(scannedLeadId, updates);
+      await refreshHistory();
+    },
+    [refreshHistory]
+  );
+
   const addBatchItem = useCallback(
     async (scannedLeadId: string): Promise<void> => {
       if (!pendingBatchId || isBatchActionLoading) {
@@ -476,6 +489,7 @@ export function useTeamWorkspace(session: Session | null | undefined): TeamWorks
         await setActiveTeamId(team.id);
         setActiveTeamIdState(team.id);
         await refreshTeamSelection();
+        setActiveTeamIdState(team.id);
         await refreshHistory();
       } catch (error) {
         console.warn('Team creation failed', error);
@@ -526,6 +540,7 @@ export function useTeamWorkspace(session: Session | null | undefined): TeamWorks
           await setActiveTeamId(activeInvite.teamId);
           setActiveTeamIdState(activeInvite.teamId);
           await refreshTeamSelection();
+          setActiveTeamIdState(activeInvite.teamId);
           await refreshHistory();
         }
       } catch (error) {
@@ -539,10 +554,12 @@ export function useTeamWorkspace(session: Session | null | undefined): TeamWorks
   );
 
   const activeInvite = pendingInvites[0] ?? null;
+  const activeTeam = teams.find((team) => team.id === activeTeamId) ?? null;
 
   return {
-    activeTeamId,
-    activeTeamName: teams.find((team) => team.id === activeTeamId)?.name ?? null,
+    activeTeamId: activeTeam?.id ?? null,
+    activeTeamName: activeTeam?.name ?? null,
+    hasTeamWorkspace: teams.length > 0,
     teams,
     createTeam: createNewTeam,
     createInvite,
@@ -570,6 +587,7 @@ export function useTeamWorkspace(session: Session | null | undefined): TeamWorks
     addBatchItem,
     removeBatchItem,
     promoteMember,
+    updateLeadDetails: updateLead,
     respondToInvite,
     updateAssignmentState: updateAssignment,
     reassignAssignment,

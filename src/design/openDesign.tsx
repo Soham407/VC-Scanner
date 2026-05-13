@@ -124,8 +124,8 @@ export function Button({
   const contained = mode === 'contained';
   const tonal = mode === 'contained-tonal';
   const outlined = mode === 'outlined';
-  const backgroundColor = buttonColor ?? (contained ? theme.colors.onSurface : tonal ? theme.colors.surfaceContainerHighest : 'transparent');
-  const color = textColor ?? (contained ? theme.colors.surface : theme.colors.onSurface);
+  const backgroundColor = buttonColor ?? (contained ? theme.colors.primary : tonal ? theme.colors.surfaceContainerHighest : 'transparent');
+  const color = textColor ?? (contained ? '#0B0D0E' : theme.colors.onSurface);
 
   return (
     <Pressable

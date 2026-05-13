@@ -57,6 +57,7 @@ describe('teamInbox', () => {
           full_name: 'Ada Lovelace',
           job_title: 'Engineer',
           company_name: 'Acme',
+          product_services: 'Automation systems',
           email: 'ada@example.com',
           phone_number: null,
           image_url: 'worker-2/lead-2.jpg',
@@ -71,6 +72,7 @@ describe('teamInbox', () => {
           full_name: 'Grace Hopper',
           job_title: 'Captain',
           company_name: 'Navy',
+          product_services: null,
           email: 'grace@example.com',
           phone_number: null,
           image_url: 'leader-1/lead-1.jpg',
@@ -115,6 +117,7 @@ describe('teamInbox', () => {
       teamName: 'North Hall',
       items: [
         {
+          address: null,
           assignedAt: null,
           assignedToUserId: null,
           assignmentState: null,
@@ -129,9 +132,11 @@ describe('teamInbox', () => {
           jobTitle: 'Engineer',
           parseStatus: 'parsed',
           phoneNumber: null,
+          productServices: 'Automation systems',
           rawText: 'Ada'
         },
         {
+          address: null,
           assignedAt: null,
           assignedToUserId: null,
           assignmentState: null,
@@ -146,6 +151,7 @@ describe('teamInbox', () => {
           jobTitle: 'Captain',
           parseStatus: 'parsed',
           phoneNumber: null,
+          productServices: null,
           rawText: 'Grace'
         }
       ],
@@ -182,6 +188,7 @@ describe('teamInbox', () => {
           full_name: 'Ada Lovelace',
           job_title: 'Engineer',
           company_name: 'Acme',
+          product_services: 'Automation systems',
           email: 'ada@example.com',
           phone_number: null,
           image_url: 'worker-2/lead-2.jpg',
@@ -231,6 +238,7 @@ describe('teamInbox', () => {
       teamName: 'North Hall',
       items: [
         {
+          address: null,
           assignedAt: '2026-05-04T10:00:00Z',
           assignedToUserId: 'worker-9',
           assignmentState: 'assigned',
@@ -245,6 +253,7 @@ describe('teamInbox', () => {
           jobTitle: 'Engineer',
           parseStatus: 'parsed',
           phoneNumber: null,
+          productServices: 'Automation systems',
           rawText: 'Ada'
         }
       ],
@@ -276,6 +285,7 @@ describe('teamInbox', () => {
       data: [
         {
           assigned_at: '2026-05-01T13:10:00Z',
+          assigned_to_user_id: 'worker-7',
           assignment_state: 'assigned',
           scanned_leads: {
             id: 'lead-3',
@@ -284,6 +294,7 @@ describe('teamInbox', () => {
             full_name: 'Worker User',
             job_title: null,
             company_name: 'Acme',
+            product_services: 'Control panels',
             email: null,
             phone_number: null,
             image_url: 'worker-9/lead-3.jpg',
@@ -329,8 +340,9 @@ describe('teamInbox', () => {
       teamName: 'North Hall',
       items: [
         {
+          address: null,
           assignedAt: '2026-05-01T13:10:00Z',
-          assignedToUserId: null,
+          assignedToUserId: 'worker-7',
           assignmentState: 'assigned',
           teamId: 'team-1',
           capturedByUserId: 'worker-9',
@@ -343,7 +355,90 @@ describe('teamInbox', () => {
           jobTitle: null,
           parseStatus: 'parsed',
           phoneNumber: null,
+          productServices: 'Control panels',
           rawText: 'Worker'
+        }
+      ],
+      mode: 'worker-history'
+    });
+  });
+
+  it('falls back to personal history when the active team context is stale', async () => {
+    const activeTeamQuery = createQueryChain({
+      data: { team_id: 'team-missing' },
+      error: null
+    });
+
+    const teamQuery = createQueryChain({
+      data: null,
+      error: null
+    });
+
+    const userHistoryQuery = createQueryChain({
+      data: [
+        {
+          id: 'lead-solo',
+          team_id: null,
+          user_id: 'user-1',
+          full_name: 'Solo User',
+          job_title: null,
+          company_name: 'Personal Co',
+          product_services: 'Solo consulting',
+          email: null,
+          phone_number: null,
+          image_url: 'user-1/lead-solo.jpg',
+          raw_ocr_text: 'Solo User',
+          parse_status: 'parsed',
+          created_at: '2026-05-01T14:00:00Z'
+        }
+      ],
+      error: null
+    });
+
+    (supabase.from as jest.Mock).mockImplementation((table: string) => {
+      if (table === 'user_team_contexts') {
+        return {
+          select: jest.fn().mockReturnValue(activeTeamQuery)
+        };
+      }
+
+      if (table === 'teams') {
+        return {
+          select: jest.fn().mockReturnValue(teamQuery)
+        };
+      }
+
+      if (table === 'scanned_leads') {
+        return {
+          select: jest.fn().mockReturnValue(userHistoryQuery)
+        };
+      }
+
+      throw new Error(`Unexpected table: ${table}`);
+    });
+
+    await expect(loadTeamInboxReview('user-1')).resolves.toEqual({
+      activeTeamId: null,
+      teamName: null,
+      items: [
+        {
+          address: null,
+          assignedAt: null,
+          assignedToUserId: null,
+          assignmentState: null,
+          teamId: null,
+          capturedByUserId: 'user-1',
+          companyName: 'Personal Co',
+          createdAt: '2026-05-01T14:00:00Z',
+          email: null,
+          fullName: 'Solo User',
+          id: 'lead-solo',
+          imagePath: 'user-1/lead-solo.jpg',
+          jobTitle: null,
+          parseStatus: 'parsed',
+          phoneNumber: null,
+          productServices: 'Solo consulting',
+          rawText: 'Solo User'
         }
       ],
       mode: 'worker-history'

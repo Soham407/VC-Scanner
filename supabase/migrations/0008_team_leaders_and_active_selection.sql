@@ -7,16 +7,6 @@ create table if not exists public.team_leaders (
 
 alter table public.team_leaders enable row level security;
 
-drop policy if exists "team_leaders_select_self_or_creator" on public.team_leaders;
-create policy "team_leaders_select_self_or_creator"
-on public.team_leaders
-for select
-to authenticated
-using (
-  auth.uid() = user_id
-  or public.is_team_leader(team_leaders.team_id, auth.uid())
-);
-
 create or replace function public.is_team_leader(target_team_id uuid, target_user_id uuid)
 returns boolean
 language sql
@@ -36,6 +26,16 @@ as $$
       and leaders.user_id = target_user_id
   );
 $$;
+
+drop policy if exists "team_leaders_select_self_or_creator" on public.team_leaders;
+create policy "team_leaders_select_self_or_creator"
+on public.team_leaders
+for select
+to authenticated
+using (
+  auth.uid() = user_id
+  or public.is_team_leader(team_leaders.team_id, auth.uid())
+);
 
 create or replace function public.promote_team_member_to_leader(target_team_id uuid, target_user_id uuid)
 returns void

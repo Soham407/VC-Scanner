@@ -6,7 +6,7 @@ import {
 type CreateJsonCompletionParams = {
   apiKey: string;
   rawText: string;
-  imageDataUrl: string;
+  imageDataUrls: string[];
 };
 
 export async function createJsonCompletion(
@@ -17,7 +17,7 @@ export async function createJsonCompletion(
   const response = await client.chat.completions.create(
     buildCardExtractionRequest({
       rawText: params.rawText,
-      imageDataUrl: params.imageDataUrl,
+      imageDataUrls: params.imageDataUrls,
     }),
   );
 
