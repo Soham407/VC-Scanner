@@ -1726,6 +1726,7 @@ function TeamScreen({
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [memberError, setMemberError] = useState<string | null>(null);
+  const [promotingMemberId, setPromotingMemberId] = useState<string | null>(null);
 
   const handleCreateInvite = () => {
     const trimmedEmail = inviteEmail.trim();
@@ -1832,7 +1833,7 @@ function TeamScreen({
                 value={inviteEmail}
               />
               <Button
-                disabled={isInviteCreationLoading || !activeTeamId}
+                disabled={isInviteCreationLoading || !activeTeamId || !inviteEmail.trim()}
                 loading={isInviteCreationLoading}
                 mode="contained"
                 onPress={handleCreateInvite}
@@ -1916,11 +1917,17 @@ function TeamScreen({
                         ) : (
                           <Button
                             compact
+                            disabled={Boolean(promotingMemberId)}
+                            loading={promotingMemberId === member.userId}
                             mode="text"
                             onPress={() => {
-                              void onPromoteMember(member.userId).catch((error) => {
-                                setMemberError(error instanceof Error ? error.message : 'Promotion failed');
-                              });
+                              setPromotingMemberId(member.userId);
+                              setMemberError(null);
+                              void onPromoteMember(member.userId)
+                                .catch((error) => {
+                                  setMemberError(error instanceof Error ? error.message : 'Promotion failed');
+                                })
+                                .finally(() => setPromotingMemberId(null));
                             }}
                           >
                             Promote

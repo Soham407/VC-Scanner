@@ -41,6 +41,12 @@ button {
   cursor: pointer;
 }
 
+button:disabled,
+select:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
 input, textarea, select {
   width: 100%;
   border: 1px solid var(--line);
@@ -276,6 +282,10 @@ textarea {
   flex-direction: column;
   align-items: stretch;
   text-align: left;
+}
+
+.card-button:disabled {
+  transform: none;
 }
 
 .list {
@@ -539,6 +549,36 @@ textarea {
   display: grid;
   place-items: center;
   color: var(--muted);
+}
+
+.loading-card {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.success-text {
+  color: #1b6a49;
+  font-weight: 700;
+}
+
+.error-text {
+  color: #a12f2f;
+  font-weight: 700;
+}
+
+.empty-state {
+  display: grid;
+  gap: 0.35rem;
+  justify-items: start;
+  padding: 0.35rem 0;
+}
+
+.empty-state p {
+  margin: 0;
+}
+
+.empty-action {
+  margin-top: 0.5rem;
 }
 
 @media (max-width: 980px) {

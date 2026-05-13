@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom';
 import { createTeam, loadAccessibleTeams, setActiveTeamId } from '../lib/api';
 import { formatDate } from '../lib/format';
 import type { AccessibleTeam } from '../lib/types';
+import { EmptyState } from '../components/EmptyState';
 
 export function TeamSelectorPage({
   activeTeamId,
@@ -17,6 +18,7 @@ export function TeamSelectorPage({
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [selectingTeamId, setSelectingTeamId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
 
@@ -51,6 +53,7 @@ export function TeamSelectorPage({
             setError(null);
             try {
               const team = await createTeam(name);
+              setName('');
               await onTeamSelected(team.id);
               navigate('/inbox');
             } catch (err) {
@@ -61,9 +64,9 @@ export function TeamSelectorPage({
           }}
         >
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="New team name" />
-          <button className="primary-button" disabled={busy}>
+          <button className="primary-button" disabled={busy || !name.trim()}>
             <Plus size={16} />
-            Create
+            {busy ? 'Creating...' : 'Create'}
           </button>
         </form>
       </div>
@@ -71,21 +74,34 @@ export function TeamSelectorPage({
       {error ? <p className="error-text">{error}</p> : null}
 
       <div className="grid-cards">
-        {loading ? <div className="card">Loading teams...</div> : null}
-        {!loading && teams.length === 0 ? <div className="card">No teams available yet.</div> : null}
+        {loading ? <div className="card loading-card">Loading teams...</div> : null}
+        {!loading && teams.length === 0 ? (
+          <div className="card">
+            <EmptyState title="No teams available">Create a team to enable shared scanning, member invites, and assignment review.</EmptyState>
+          </div>
+        ) : null}
         {teams.map((team) => (
           <button
             key={team.id}
             className="card card-button"
+            disabled={Boolean(selectingTeamId)}
             onClick={async () => {
-              await setActiveTeamId(team.id);
-              await onTeamSelected(team.id);
-              navigate('/inbox');
+              setSelectingTeamId(team.id);
+              setError(null);
+              try {
+                await setActiveTeamId(team.id);
+                await onTeamSelected(team.id);
+                navigate('/inbox');
+              } catch (err) {
+                setError(err instanceof Error ? err.message : 'Failed to switch team');
+              } finally {
+                setSelectingTeamId(null);
+              }
             }}
           >
             <div className="card-top">
               <strong>{team.name}</strong>
-              {team.id === activeTeamId ? <Check size={16} /> : null}
+              {team.id === activeTeamId ? <Check size={16} /> : selectingTeamId === team.id ? <span className="muted">Switching...</span> : null}
             </div>
             <p className="muted">Created {formatDate(team.createdAt)}</p>
           </button>

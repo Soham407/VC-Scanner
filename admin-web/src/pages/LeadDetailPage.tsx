@@ -4,6 +4,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { getLeadImageUrl, loadLead, loadTeamMembers, reassignLead, updateAssignmentState, updateLeadDetails } from '../lib/api';
 import { formatDate } from '../lib/format';
 import type { Lead, TeamMember } from '../lib/types';
+import { EmptyState } from '../components/EmptyState';
 
 export function LeadDetailPage({
   canManageTeam,
@@ -20,6 +21,7 @@ export function LeadDetailPage({
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
   const [reassignTo, setReassignTo] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -74,10 +76,12 @@ export function LeadDetailPage({
             event.preventDefault();
             setSaving(true);
             setError(null);
+            setNotice(null);
             try {
               await updateLeadDetails(lead.id, lead);
               const refreshed = await loadLead(lead.id, teamId);
               setLead(refreshed);
+              setNotice('Lead details saved.');
             } catch (err) {
               setError(err instanceof Error ? err.message : 'Failed to save lead');
             } finally {
@@ -90,9 +94,11 @@ export function LeadDetailPage({
           <label className="field"><span>Company</span><input value={lead.companyName ?? ''} onChange={(e) => setLead({ ...lead, companyName: e.target.value })} /></label>
           <label className="field"><span>Email</span><input value={lead.email ?? ''} onChange={(e) => setLead({ ...lead, email: e.target.value })} /></label>
           <label className="field"><span>Phone</span><input value={lead.phoneNumber ?? ''} onChange={(e) => setLead({ ...lead, phoneNumber: e.target.value })} /></label>
-          <label className="field"><span>Address</span><input value={lead.address ?? ''} onChange={(e) => setLead({ ...lead, address: e.target.value })} /></label>
+          <label className="field"><span>Address</span><textarea value={lead.address ?? ''} onChange={(e) => setLead({ ...lead, address: e.target.value })} /></label>
           <label className="field"><span>Product / services</span><textarea value={lead.productServices ?? ''} onChange={(e) => setLead({ ...lead, productServices: e.target.value })} /></label>
           <button className="primary-button" disabled={saving}>{saving ? 'Saving...' : 'Save lead'}</button>
+          {notice ? <p className="success-text">{notice}</p> : null}
+          {error ? <p className="error-text">{error}</p> : null}
         </form>
 
         <div className="stack">
@@ -100,7 +106,7 @@ export function LeadDetailPage({
             <div className="card stack">
               <div className="eyebrow">Assignment</div>
               <p className="muted">
-                Assigned to: {members.find((member) => member.userId === lead.assignedToUserId)?.email ?? lead.assignedToUserId ?? 'Unassigned'}
+                Assigned to: {members.find((member) => member.userId === lead.assignedToUserId)?.email ?? (lead.assignedToUserId ? 'Unknown team member' : 'Unassigned')}
               </p>
               <p className="muted">State: {lead.assignmentState ?? 'unassigned'}</p>
 
@@ -114,6 +120,7 @@ export function LeadDetailPage({
                       if (!nextState) return;
                       setSaving(true);
                       setError(null);
+                      setNotice(null);
                       try {
                         await updateAssignmentState(lead.id, nextState);
                         setLead(await loadLead(lead.id, teamId));
@@ -137,7 +144,7 @@ export function LeadDetailPage({
                   <label className="field">
                     <span>Reassign to worker</span>
                     <select value={reassignTo} onChange={(e) => setReassignTo(e.target.value)}>
-                      <option value="">Select a worker</option>
+                      <option value="">{members.some((member) => !member.isLeader) ? 'Select a worker' : 'No workers available'}</option>
                       {members
                         .filter((member) => !member.isLeader)
                         .map((member) => (
@@ -153,11 +160,13 @@ export function LeadDetailPage({
                     onClick={async () => {
                       setSaving(true);
                       setError(null);
+                      setNotice(null);
                       try {
                         await reassignLead(lead.id, reassignTo);
                         const refreshed = await loadLead(lead.id, teamId);
                         setLead(refreshed);
                         setReassignTo('');
+                        setNotice('Assignment updated.');
                       } catch (err) {
                         setError(err instanceof Error ? err.message : 'Failed to reassign lead');
                       } finally {
@@ -174,16 +183,18 @@ export function LeadDetailPage({
 
           <div className="card">
             <div className="eyebrow">Metadata</div>
-            {imageUrl ? <img className="lead-image" src={imageUrl} alt="Scanned business card" /> : null}
+            {imageUrl ? (
+              <img className="lead-image" src={imageUrl} alt="Scanned business card" />
+            ) : (
+              <EmptyState title="No card image">This lead has no available card image or the image link could not be opened.</EmptyState>
+            )}
             <p className="muted">Captured: {formatDate(lead.createdAt)}</p>
-            <p className="muted">Capture team: {lead.teamId ?? 'Personal'}</p>
-            <p className="muted">Image: {lead.imagePath ?? 'No image path'}</p>
+            <p className="muted">Capture workspace: {lead.teamId ? 'Team' : 'Personal'}</p>
             <details className="raw-text">
               <summary>Raw OCR</summary>
               <pre>{lead.rawText ?? 'Empty'}</pre>
             </details>
           </div>
-          {error ? <p className="error-text">{error}</p> : null}
         </div>
       </div>
     </section>

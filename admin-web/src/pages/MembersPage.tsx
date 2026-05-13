@@ -2,17 +2,31 @@ import { useEffect, useState } from 'react';
 
 import { loadTeamMembers, promoteTeamMemberToLeader } from '../lib/api';
 import type { TeamMember } from '../lib/types';
+import { EmptyState } from '../components/EmptyState';
 
 export function MembersPage({ teamId }: { teamId: string }) {
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [busyUserId, setBusyUserId] = useState<string | null>(null);
 
   useEffect(() => {
+    let active = true;
     setError(null);
+    setLoading(true);
     loadTeamMembers(teamId)
-      .then(setMembers)
-      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load members'));
+      .then((rows) => {
+        if (active) setMembers(rows);
+      })
+      .catch((err) => {
+        if (active) setError(err instanceof Error ? err.message : 'Failed to load members');
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, [teamId]);
 
   return (
@@ -27,16 +41,19 @@ export function MembersPage({ teamId }: { teamId: string }) {
       {error ? <p className="error-text">{error}</p> : null}
 
       <div className="card stack">
-        {members.length === 0 ? <p className="muted">No members found.</p> : null}
+        {loading ? <div className="loading-card">Loading members...</div> : null}
+        {!loading && members.length === 0 ? (
+          <EmptyState title="No members found">Invite workers from the Invites page. Accepted invitations appear here.</EmptyState>
+        ) : null}
         {members.map((member) => (
           <div className="mini-row" key={member.userId}>
             <div>
               <strong>{member.email}</strong>
-              <p className="muted">{member.isLeader ? 'Leader' : 'Worker'} · {member.userId}</p>
+              <p className="muted">{member.isLeader ? 'Team leader' : 'Worker'}</p>
             </div>
             <button
               className="ghost-button"
-              disabled={member.isLeader || busyUserId === member.userId}
+              disabled={member.isLeader || Boolean(busyUserId)}
               onClick={async () => {
                 setBusyUserId(member.userId);
                 setError(null);
@@ -50,7 +67,7 @@ export function MembersPage({ teamId }: { teamId: string }) {
                 }
               }}
             >
-              Promote
+              {busyUserId === member.userId ? 'Promoting...' : member.isLeader ? 'Leader' : 'Promote'}
             </button>
           </div>
         ))}

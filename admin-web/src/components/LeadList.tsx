@@ -3,6 +3,7 @@ import { Search } from 'lucide-react';
 
 import { formatDate, initials, stateLabel } from '../lib/format';
 import type { Lead } from '../lib/types';
+import { EmptyState } from './EmptyState';
 import { StatusPill } from './StatusPill';
 
 export function LeadList({
@@ -18,9 +19,10 @@ export function LeadList({
   query: string;
   setQuery: (query: string) => void;
 }) {
+  const trimmedQuery = query.trim().toLowerCase();
   const filtered = leads.filter((lead) => {
     const text = `${lead.fullName ?? ''} ${lead.companyName ?? ''} ${lead.email ?? ''} ${lead.phoneNumber ?? ''}`.toLowerCase();
-    return text.includes(query.toLowerCase());
+    return text.includes(trimmedQuery);
   });
   const needsReview = leads.filter((lead) => lead.assignmentState === 'needs_review').length;
   const done = leads.filter((lead) => lead.assignmentState === 'done').length;
@@ -56,8 +58,14 @@ export function LeadList({
       </div>
 
       <div className="list">
-        {loading ? <div className="card">Loading leads...</div> : null}
-        {!loading && filtered.length === 0 ? <div className="card">{emptyText}</div> : null}
+        {loading ? <div className="card loading-card">Loading leads...</div> : null}
+        {!loading && filtered.length === 0 ? (
+          <div className="card">
+            <EmptyState title={trimmedQuery ? 'No matching leads' : 'No leads yet'}>
+              {trimmedQuery ? 'Clear the search or try a name, company, email, or phone number.' : emptyText}
+            </EmptyState>
+          </div>
+        ) : null}
         {filtered.map((lead) => (
           <article className="card lead-row" key={lead.id}>
             <div className="lead-badge">{initials(lead.companyName ?? lead.fullName ?? lead.email)}</div>

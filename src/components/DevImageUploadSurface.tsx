@@ -42,6 +42,7 @@ export function DevImageUploadSurface(): JSX.Element {
   const [isPicking, setIsPicking] = useState(false);
   const [isPreparing, setIsPreparing] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   const handlePickImage = async (): Promise<void> => {
     setIsPicking(true);
@@ -61,11 +62,7 @@ export function DevImageUploadSurface(): JSX.Element {
       setPickedImageUri(selectedUri);
       setPreparedCachePath(null);
       setLeadId(generatedLeadId);
-
-      console.log('Dev upload picked image', {
-        leadId: generatedLeadId,
-        uri: selectedUri
-      });
+      setStatusMessage('Image selected');
     } finally {
       setIsPicking(false);
     }
@@ -83,13 +80,7 @@ export function DevImageUploadSurface(): JSX.Element {
       const dimensions = await getImageDimensions(cachePath);
 
       setPreparedCachePath(cachePath);
-
-      console.log('Dev upload prepared image', {
-        cachePath,
-        height: dimensions.height,
-        longEdge: Math.max(dimensions.width, dimensions.height),
-        width: dimensions.width
-      });
+      setStatusMessage(`Prepared ${dimensions.width} x ${dimensions.height}`);
     } finally {
       setIsPreparing(false);
     }
@@ -104,8 +95,7 @@ export function DevImageUploadSurface(): JSX.Element {
 
     try {
       const storagePath = await uploadCardImage(preparedCachePath, leadId);
-
-      console.log('Dev upload storage path', storagePath);
+      setStatusMessage(`Uploaded ${storagePath}`);
     } finally {
       setIsUploading(false);
     }
@@ -153,6 +143,7 @@ export function DevImageUploadSurface(): JSX.Element {
       {preparedCachePath ? (
         <Text style={[styles.meta, { color: theme.colors.onSurface }]}>prepared: {preparedCachePath}</Text>
       ) : null}
+      {statusMessage ? <Text style={[styles.meta, { color: theme.colors.onSurface }]}>{statusMessage}</Text> : null}
     </View>
   );
 }

@@ -3,19 +3,36 @@ import { useEffect, useState } from 'react';
 import { createTeamInvite, listPendingTeamInvitesForTeam } from '../lib/api';
 import { formatDate } from '../lib/format';
 import type { TeamInvite } from '../lib/types';
+import { EmptyState } from '../components/EmptyState';
 
 export function InvitesPage({ teamId }: { teamId: string }) {
   const [invites, setInvites] = useState<TeamInvite[]>([]);
   const [email, setEmail] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   async function refresh() {
     setInvites(await listPendingTeamInvitesForTeam(teamId));
   }
 
   useEffect(() => {
-    void refresh().catch((err) => setError(err instanceof Error ? err.message : 'Failed to load invites'));
+    let active = true;
+    setLoading(true);
+    setError(null);
+    listPendingTeamInvitesForTeam(teamId)
+      .then((rows) => {
+        if (active) setInvites(rows);
+      })
+      .catch((err) => {
+        if (active) setError(err instanceof Error ? err.message : 'Failed to load invites');
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, [teamId]);
 
   return (
@@ -47,11 +64,14 @@ export function InvitesPage({ teamId }: { teamId: string }) {
         }}
       >
         <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder="teammate@company.com" />
-        <button className="primary-button" disabled={busy || !email.trim()}>Invite</button>
+        <button className="primary-button" disabled={busy || !email.trim()}>{busy ? 'Sending...' : 'Invite'}</button>
       </form>
 
       <div className="card stack">
-        {invites.length === 0 ? <p className="muted">No pending invitations.</p> : null}
+        {loading ? <div className="loading-card">Loading invitations...</div> : null}
+        {!loading && invites.length === 0 ? (
+          <EmptyState title="No pending invitations">Invite workers who should receive and complete assigned card follow-ups.</EmptyState>
+        ) : null}
         {invites.map((invite) => (
           <div className="mini-row" key={invite.id}>
             <strong>{invite.invitedEmail}</strong>

@@ -11,12 +11,15 @@ import {
   removeBatchItem
 } from '../lib/api';
 import type { Lead, PendingBatch, TeamMember } from '../lib/types';
+import { EmptyState } from '../components/EmptyState';
 
 export function AssignPage({ teamId }: { teamId: string }) {
   const [batch, setBatch] = useState<PendingBatch | null>(null);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
 
   async function refresh() {
@@ -31,7 +34,19 @@ export function AssignPage({ teamId }: { teamId: string }) {
   }
 
   useEffect(() => {
-    void refresh().catch((err) => setError(err instanceof Error ? err.message : 'Failed to load assignment data'));
+    let active = true;
+    setLoading(true);
+    setError(null);
+    refresh()
+      .catch((err) => {
+        if (active) setError(err instanceof Error ? err.message : 'Failed to load assignment data');
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, [teamId]);
 
   const assignedIds = new Set(batch?.items.map((item) => item.scannedLeadId));
@@ -53,10 +68,11 @@ export function AssignPage({ teamId }: { teamId: string }) {
           onClick={async () => {
             setBusy(true);
             setError(null);
+            setNotice(null);
             try {
               const created = await createAssignmentBatch(teamId);
               await refresh();
-              setError(`Created batch with ${created.scanCount} scans`);
+              setNotice(`Created batch with ${created.scanCount} scans`);
             } catch (err) {
               setError(err instanceof Error ? err.message : 'Failed to create batch');
             } finally {
@@ -69,6 +85,8 @@ export function AssignPage({ teamId }: { teamId: string }) {
       </div>
 
       {error ? <p className="error-text">{error}</p> : null}
+      {notice ? <p className="success-text">{notice}</p> : null}
+      {loading ? <div className="card loading-card">Loading assignment workspace...</div> : null}
 
       <div className="two-col">
         <div className="card stack">
@@ -81,8 +99,24 @@ export function AssignPage({ teamId }: { teamId: string }) {
               <div className="list compact">
                 {batch.items.map((item) => (
                   <div className="mini-row" key={item.scannedLeadId}>
-                    <span>{leadById.get(item.scannedLeadId)?.companyName ?? leadById.get(item.scannedLeadId)?.fullName ?? item.scannedLeadId}</span>
-                    <button className="ghost-button" disabled={busy} onClick={async () => { await removeBatchItem(batch.batchId, item.scannedLeadId); await refresh(); }}>
+                    <span>{leadById.get(item.scannedLeadId)?.companyName ?? leadById.get(item.scannedLeadId)?.fullName ?? 'Untitled lead'}</span>
+                    <button
+                      className="ghost-button"
+                      disabled={busy}
+                      onClick={async () => {
+                        setBusy(true);
+                        setError(null);
+                        setNotice(null);
+                        try {
+                          await removeBatchItem(batch.batchId, item.scannedLeadId);
+                          await refresh();
+                        } catch (err) {
+                          setError(err instanceof Error ? err.message : 'Failed to remove lead from batch');
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                    >
                       Remove
                     </button>
                   </div>
@@ -90,13 +124,18 @@ export function AssignPage({ teamId }: { teamId: string }) {
               </div>
               <button
                 className="primary-button"
+                disabled={busy || batch.items.length === 0 || workerMembers.length === 0}
                 onClick={async () => {
                   setBusy(true);
                   setError(null);
                   try {
+                    if (workerMembers.length === 0) {
+                      setError('Add at least one worker before approving assignments.');
+                      return;
+                    }
                     const count = await approveBatch(batch.batchId);
                     await refresh();
-                    setError(`Approved ${count} assignments`);
+                    setNotice(`Approved ${count} assignments`);
                   } catch (err) {
                     setError(err instanceof Error ? err.message : 'Failed to approve batch');
                   } finally {
@@ -108,7 +147,7 @@ export function AssignPage({ teamId }: { teamId: string }) {
               </button>
             </>
           ) : (
-            <p className="muted">Create a batch to collect unassigned scans.</p>
+            <EmptyState title="No pending batch">Create a batch to collect unassigned scans for team distribution.</EmptyState>
           )}
         </div>
 
@@ -118,16 +157,28 @@ export function AssignPage({ teamId }: { teamId: string }) {
             <span>{unassignedLeads.length}</span>
           </div>
           <div className="list compact">
+            {!loading && unassignedLeads.length === 0 ? (
+              <EmptyState title="No unassigned leads">New team scans will appear here before they are assigned.</EmptyState>
+            ) : null}
             {unassignedLeads.map((lead) => (
               <div className="mini-row" key={lead.id}>
-                <span>{lead.companyName ?? lead.fullName ?? lead.id}</span>
+                <span>{lead.companyName ?? lead.fullName ?? 'Untitled lead'}</span>
                 <button
                   className="ghost-button"
-                  disabled={!batch || assignedIds.has(lead.id)}
+                  disabled={busy || !batch || assignedIds.has(lead.id)}
                   onClick={async () => {
                     if (!batch) return;
-                    await addBatchItem(batch.batchId, lead.id);
-                    await refresh();
+                    setBusy(true);
+                    setError(null);
+                    setNotice(null);
+                    try {
+                      await addBatchItem(batch.batchId, lead.id);
+                      await refresh();
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : 'Failed to add lead to batch');
+                    } finally {
+                      setBusy(false);
+                    }
                   }}
                 >
                   Add
@@ -144,7 +195,7 @@ export function AssignPage({ teamId }: { teamId: string }) {
           <span>{assignedLeads.length}</span>
         </div>
         <div className="list compact">
-          {assignedLeads.length === 0 ? <p className="muted">No assigned cards yet.</p> : null}
+          {!loading && assignedLeads.length === 0 ? <EmptyState title="No assigned cards yet">Approved batches and reassigned leads appear here.</EmptyState> : null}
           {assignedLeads.map((lead) => (
             <div className="mini-row reassignment-row" key={lead.id}>
               <div>
@@ -156,10 +207,12 @@ export function AssignPage({ teamId }: { teamId: string }) {
               <select
                 aria-label={`Reassign ${lead.companyName ?? lead.fullName ?? lead.id}`}
                 value={lead.assignedToUserId ?? ''}
-                disabled={busy}
+                disabled={busy || workerMembers.length === 0}
                 onChange={async (event) => {
+                  if (!event.target.value || event.target.value === lead.assignedToUserId) return;
                   setBusy(true);
                   setError(null);
+                  setNotice(null);
                   try {
                     await reassignLead(lead.id, event.target.value);
                     await refresh();
@@ -170,6 +223,7 @@ export function AssignPage({ teamId }: { teamId: string }) {
                   }
                 }}
               >
+                {workerMembers.length === 0 ? <option value="">No workers available</option> : null}
                 {workerMembers.map((member) => (
                   <option key={member.userId} value={member.userId}>
                     {member.email}

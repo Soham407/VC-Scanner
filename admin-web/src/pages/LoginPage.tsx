@@ -67,7 +67,7 @@ export function LoginPage() {
               <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder="leader@company.com" />
             </div>
           </label>
-          <button className="primary-button" disabled={loading || Boolean(supabaseConfigError)}>
+          <button className="primary-button" disabled={loading || Boolean(supabaseConfigError) || !email.trim()}>
             <Send size={16} />
             {loading ? 'Sending link...' : 'Send magic link'}
           </button>
