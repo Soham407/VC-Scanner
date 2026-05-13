@@ -122,11 +122,11 @@ const parsedCardFields: Array<{
 ];
 
 function getTeamInboxItemTitle(item: TeamInboxItem): string {
-  return item.fullName ?? item.companyName ?? item.rawText.split('\n')[0] ?? 'Untitled scan';
+  return item.companyName ?? item.fullName ?? item.rawText.split('\n')[0] ?? 'Untitled scan';
 }
 
 function getTeamInboxItemSubtitle(item: TeamInboxItem): string {
-  return item.companyName ?? item.jobTitle ?? item.email ?? item.id;
+  return item.fullName ?? item.jobTitle ?? item.email ?? item.id;
 }
 
 function getAssignmentLabel(item: TeamInboxItem): string {

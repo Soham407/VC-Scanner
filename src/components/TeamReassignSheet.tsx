@@ -42,7 +42,7 @@ function TeamReassignSheetImpl(
           {assignmentItem ? (
             <View style={styles.headerMeta}>
               <Chip compact style={styles.assignmentChip}>
-                {assignmentItem.fullName ?? assignmentItem.companyName ?? assignmentItem.id}
+                {assignmentItem.companyName ?? assignmentItem.fullName ?? assignmentItem.id}
               </Chip>
               {assignmentItem.assignedToUserId ? (
                 <Chip compact mode="outlined" style={styles.assignmentChip}>

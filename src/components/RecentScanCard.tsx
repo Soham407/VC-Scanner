@@ -14,11 +14,11 @@ import { motion } from '../theme/motion';
 import { StatusChip } from './StatusChip';
 
 function getLeadTitle(item: ScannerHistoryItem): string {
-  return item.parsed.fullName ?? item.parsed.companyName ?? item.rawText.split('\n')[0] ?? 'Untitled scan';
+  return item.parsed.companyName ?? item.parsed.fullName ?? item.rawText.split('\n')[0] ?? 'Untitled scan';
 }
 
 function getLeadSubtitle(item: ScannerHistoryItem): string {
-  return item.parsed.companyName ?? item.parsed.jobTitle ?? item.parsed.email ?? item.id;
+  return item.parsed.fullName ?? item.parsed.jobTitle ?? item.parsed.email ?? item.id;
 }
 
 export function RecentScanCard({

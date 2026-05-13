@@ -30,8 +30,8 @@ function RecentScansSheetImpl(
             </PaperText>
           }
           renderItem={({ item }) => {
-            const primaryText = item.parsed.fullName ?? item.parsed.companyName ?? item.id;
-            const secondaryText = item.parsed.companyName ?? item.parsed.jobTitle ?? item.rawText.split('\n')[0] ?? '';
+            const primaryText = item.parsed.companyName ?? item.parsed.fullName ?? item.id;
+            const secondaryText = item.parsed.fullName ?? item.parsed.jobTitle ?? item.rawText.split('\n')[0] ?? '';
 
             return (
               <View style={[styles.row, { backgroundColor: theme.colors.surfaceContainer }]}>

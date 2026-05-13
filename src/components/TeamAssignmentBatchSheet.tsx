@@ -79,10 +79,10 @@ function TeamAssignmentBatchSheetImpl(
                     {item.imagePath ? <Image source={{ uri: item.imagePath }} style={styles.thumb} /> : null}
                     <View style={styles.rowCopy}>
                       <Text numberOfLines={1} variant="titleSmall">
-                        {item.fullName ?? item.companyName ?? item.rawText.split('\n')[0] ?? 'Untitled scan'}
+                        {item.companyName ?? item.fullName ?? item.rawText.split('\n')[0] ?? 'Untitled scan'}
                       </Text>
                       <Text numberOfLines={1} style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
-                        {item.companyName ?? item.jobTitle ?? item.email ?? item.id}
+                        {item.fullName ?? item.jobTitle ?? item.email ?? item.id}
                       </Text>
                     </View>
                     <Button
@@ -117,10 +117,10 @@ function TeamAssignmentBatchSheetImpl(
                     {item.imagePath ? <Image source={{ uri: item.imagePath }} style={styles.thumb} /> : null}
                     <View style={styles.rowCopy}>
                       <Text numberOfLines={1} variant="titleSmall">
-                        {item.fullName ?? item.companyName ?? item.rawText.split('\n')[0] ?? 'Untitled scan'}
+                        {item.companyName ?? item.fullName ?? item.rawText.split('\n')[0] ?? 'Untitled scan'}
                       </Text>
                       <Text numberOfLines={1} style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
-                        {item.companyName ?? item.jobTitle ?? item.email ?? item.id}
+                        {item.fullName ?? item.jobTitle ?? item.email ?? item.id}
                       </Text>
                     </View>
                     <Button
