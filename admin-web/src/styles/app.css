@@ -103,7 +103,7 @@ textarea {
   gap: 0.4rem;
 }
 
-.nav-item, .ghost-button, .primary-button, .card-button {
+.nav-item, .ghost-button, .primary-button, .google-button, .card-button {
   display: inline-flex;
   align-items: center;
   gap: 0.6rem;
@@ -138,7 +138,7 @@ textarea {
   color: var(--ink);
 }
 
-.nav-item:hover, .ghost-button:hover, .primary-button:hover, .card-button:hover {
+.nav-item:hover, .ghost-button:hover, .primary-button:hover, .google-button:hover, .card-button:hover {
   transform: translateY(-1px);
 }
 
@@ -295,12 +295,48 @@ textarea {
 }
 
 .login-panel {
+  display: grid;
+  gap: 1rem;
   max-width: 620px;
   background: rgba(255,255,255,0.78);
   border: 1px solid var(--line);
   border-radius: 8px;
   box-shadow: var(--shadow);
   padding: 2rem;
+}
+
+.google-button {
+  width: 100%;
+  padding: 0.85rem 1rem;
+  background: white;
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+.google-mark {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  font-weight: 800;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.divider::before,
+.divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
 }
 
 .lead-image {
