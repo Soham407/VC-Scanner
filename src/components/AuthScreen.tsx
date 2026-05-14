@@ -1,11 +1,11 @@
 import { useState } from 'react';
 import { Alert, KeyboardAvoidingView, Linking, Platform, ScrollView, StyleSheet, View } from 'react-native';
-import * as ExpoLinking from 'expo-linking';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Button, Surface, Text, TextInput } from '../design/openDesign';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 
 import { AppLogo } from './AppLogo';
+import { createAuthRedirectUrl } from '../lib/authRedirect';
 import { supabase } from '../lib/supabase';
 import { useAppTheme } from '../theme/materialTheme';
 import { motion } from '../theme/motion';
@@ -59,7 +59,6 @@ export function AuthScreen() {
   const [isResettingPassword, setIsResettingPassword] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const redirectTo = ExpoLinking.createURL('auth/callback');
   const isSignUpPasswordMismatch = mode === 'signUp' && confirmPassword.length > 0 && password !== confirmPassword;
 
   const switchMode = (nextMode: AuthMode): void => {
@@ -91,6 +90,7 @@ export function AuthScreen() {
 
     try {
       if (mode === 'signUp') {
+        const redirectTo = await createAuthRedirectUrl('email');
         const { data, error } = await supabase.auth.signUp({
           email: trimmedEmail,
           password,
@@ -136,6 +136,7 @@ export function AuthScreen() {
     setErrorMessage(null);
 
     try {
+      const redirectTo = await createAuthRedirectUrl('recovery');
       const { error } = await supabase.auth.resetPasswordForEmail(trimmedEmail, {
         redirectTo
       });
@@ -160,6 +161,7 @@ export function AuthScreen() {
     setErrorMessage(null);
 
     try {
+      const redirectTo = await createAuthRedirectUrl('oauth');
       await signInWithGoogle(redirectTo);
     } catch (error) {
       setErrorMessage(getAuthErrorMessage(error));

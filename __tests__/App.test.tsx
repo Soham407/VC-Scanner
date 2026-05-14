@@ -12,6 +12,7 @@ const mockTakePictureAsync = jest.fn();
 const mockExtractText = jest.fn();
 const mockPrepareImage = jest.fn();
 const mockUploadCardImage = jest.fn();
+const mockDeleteCardImages = jest.fn();
 const mockParseCardPreview = jest.fn();
 const mockSaveParsedCard = jest.fn();
 const mockEnqueue = jest.fn();
@@ -45,6 +46,11 @@ const mockSignUp = jest.fn();
 const mockSignInWithOAuth = jest.fn();
 const mockExchangeCodeForSession = jest.fn();
 const mockSetSession = jest.fn();
+const mockConsumeAuthRedirectFlow = jest.fn();
+const mockSupabaseFrom = jest.fn();
+const mockSupabaseStorageFrom = jest.fn();
+const mockSupabaseCreateSignedUrl = jest.fn();
+const mockSupabaseUpdate = jest.fn();
 const mockSyncScannerQueueStoreNamespace = jest.fn().mockResolvedValue(undefined);
 const mockLoadTeamInboxReview = jest.fn();
 const mockUpdateScannedLeadDetails = jest.fn();
@@ -116,7 +122,13 @@ jest.mock('../src/lib/imagePrep', () => ({
 }));
 
 jest.mock('../src/lib/upload', () => ({
+  deleteCardImages: (...args: unknown[]) => mockDeleteCardImages(...args),
   uploadCardImage: (...args: unknown[]) => mockUploadCardImage(...args)
+}));
+
+jest.mock('../src/lib/authRedirect', () => ({
+  consumeAuthRedirectFlow: (...args: unknown[]) => mockConsumeAuthRedirectFlow(...args),
+  createAuthRedirectUrl: jest.fn()
 }));
 
 jest.mock('../src/lib/scanCard', () => ({
@@ -142,6 +154,10 @@ jest.mock('../src/lib/supabase', () => ({
       signInWithPassword: (...args: unknown[]) => mockSignInWithPassword(...args),
       signOut: (...args: unknown[]) => mockSignOut(...args),
       signUp: (...args: unknown[]) => mockSignUp(...args)
+    },
+    from: (...args: unknown[]) => mockSupabaseFrom(...args),
+    storage: {
+      from: (...args: unknown[]) => mockSupabaseStorageFrom(...args)
     }
   }
 }));
@@ -211,7 +227,12 @@ jest.mock('../store/scanner', () => ({
   garbageCollectOrphanedQueueImages: (...args: unknown[]) => mockGarbageCollect(...args),
   syncScannerQueueStoreNamespace: (...args: unknown[]) => mockSyncScannerQueueStoreNamespace(...args),
   scannerQueueStore: {
-    getState: () => ({ queue: mockQueue, history: mockHistory, systemNotice: mockSystemNotice })
+    getState: () => ({
+      history: mockHistory,
+      queue: mockQueue,
+      replaceHistory: jest.fn(),
+      systemNotice: mockSystemNotice
+    })
   },
   useScannerQueueStore: (selector: (state: unknown) => unknown) => selector({
     queue: mockQueue,
@@ -219,6 +240,7 @@ jest.mock('../store/scanner', () => ({
     systemNotice: mockSystemNotice,
     enqueue: mockEnqueue,
     recordHistory: mockRecordHistory,
+    replaceHistory: jest.fn(),
     clearHistory: jest.fn(),
     clearSystemNotice: mockClearSystemNotice,
     retry: mockRetry,
@@ -324,6 +346,8 @@ describe('App permissions flow', () => {
     jest.spyOn(Linking, 'getInitialURL').mockResolvedValue(null);
     mockGarbageCollect.mockResolvedValue(undefined);
     mockDrainOnce.mockResolvedValue(undefined);
+    mockDeleteCardImages.mockResolvedValue(undefined);
+    mockConsumeAuthRedirectFlow.mockResolvedValue(true);
     mockLoadCurrentTeam.mockResolvedValue(null);
     mockCreateTeam.mockResolvedValue({
       createdAt: '2026-05-04T10:00:00Z',
@@ -396,6 +420,42 @@ describe('App permissions flow', () => {
       teamName: null,
       items: [],
       mode: 'worker-history'
+    });
+    mockSupabaseCreateSignedUrl.mockResolvedValue({
+      data: { signedUrl: 'https://cdn.example.com/card.jpg' },
+      error: null
+    });
+    mockSupabaseStorageFrom.mockReturnValue({
+      createSignedUrl: (...args: unknown[]) => mockSupabaseCreateSignedUrl(...args)
+    });
+    mockSupabaseUpdate.mockReturnValue({
+      eq: jest.fn().mockReturnValue({
+        maybeSingle: jest.fn().mockResolvedValue({ data: { id: 'lead-1' }, error: null })
+      })
+    });
+    mockSupabaseFrom.mockImplementation((table: string) => {
+      if (table === 'scanned_leads') {
+        return {
+          select: jest.fn().mockReturnValue({
+            eq: jest.fn().mockReturnValue({
+              is: jest.fn().mockReturnValue({
+                order: jest.fn().mockResolvedValue({ data: [], error: null })
+              })
+            })
+          }),
+          update: (...args: unknown[]) => mockSupabaseUpdate(...args)
+        };
+      }
+
+      return {
+        select: jest.fn().mockReturnValue({
+          eq: jest.fn().mockReturnValue({
+            is: jest.fn().mockReturnValue({
+              order: jest.fn().mockResolvedValue({ data: [], error: null })
+            })
+          })
+        })
+      };
     });
     mockReassignTeamAssignment.mockResolvedValue(undefined);
     await AsyncStorage.clear();
@@ -594,9 +654,9 @@ describe('App permissions flow', () => {
     });
 
     expect(screen.getAllByText('History').length).toBeGreaterThan(0);
-    expect(screen.getByText('My scans')).toBeTruthy();
+    expect(screen.getByText('Personal workspace')).toBeTruthy();
     expect(screen.getAllByText('Ada Lovelace').length).toBeGreaterThan(0);
-    expect(screen.getByText('Saved scan')).toBeTruthy();
+    expect(screen.getAllByText('Saved').length).toBeGreaterThan(0);
     expect(screen.queryByText('Assignments')).toBeNull();
     expect(screen.queryByText('Assigned to you')).toBeNull();
     expect(screen.queryByText('Select cards')).toBeNull();
@@ -610,6 +670,20 @@ describe('App permissions flow', () => {
       id: 'team-1',
       name: 'North Hall'
     });
+    mockLoadTeamMembers.mockResolvedValue([
+      {
+        createdAt: '2026-05-01T08:00:00Z',
+        email: 'leader@example.com',
+        isLeader: true,
+        userId: 'leader-1'
+      },
+      {
+        createdAt: '2026-05-01T08:05:00Z',
+        email: 'user@example.com',
+        isLeader: false,
+        userId: 'user-1'
+      }
+    ]);
 
     await renderAppReady();
     await act(async () => {
@@ -623,8 +697,12 @@ describe('App permissions flow', () => {
       await Promise.resolve();
     });
 
-    expect(screen.getByText('Company team')).toBeTruthy();
     expect(screen.getByText('North Hall')).toBeTruthy();
+    expect(screen.getByText('leader@example.com')).toBeTruthy();
+    expect(screen.getAllByText('user@example.com').length).toBeGreaterThan(0);
+    expect(screen.getByText('Leader')).toBeTruthy();
+    expect(screen.getByText('Worker')).toBeTruthy();
+    expect(screen.getByTestId('team-members-scroll')).toBeTruthy();
     expect(screen.queryByText('Make active')).toBeNull();
     expect(screen.queryByText('Switch team')).toBeNull();
   });
@@ -1105,7 +1183,7 @@ describe('App permissions flow', () => {
     fireEvent.press(screen.getByText('Team'));
 
     await waitFor(() => {
-      expect(screen.getByText('Company team')).toBeTruthy();
+      expect(screen.getByText('Team workspace')).toBeTruthy();
     });
     expect(screen.getByText('North Hall')).toBeTruthy();
     expect(screen.queryByText('Create your first team')).toBeNull();
@@ -1464,7 +1542,7 @@ describe('App permissions flow', () => {
     });
     expect(mockRecordHistory).toHaveBeenCalledWith({
       id: leadId,
-      imagePath: 'file:///documents/history/lead-5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg',
+      imagePath: 'file:///cache/lead-5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg',
       parsed: {
         address: null,
         companyName: 'Acme Corp',

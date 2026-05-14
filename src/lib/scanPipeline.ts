@@ -13,7 +13,7 @@ export type ScanQueueItem = {
   imagePath: string;
   teamId?: string | null;
   storagePath?: string;
-  rawText: string;
+  rawText?: string;
   retryCount: number;
   nextAttemptAt?: number;
   error?: string;
@@ -32,6 +32,7 @@ export type ScanHistoryItem = {
 export type ScanPipelineDeps = {
   archiveImage: (imagePath: string, leadId: string) => Promise<string>;
   deleteImage: (imagePath: string) => Promise<void>;
+  extractText?: (imagePath: string) => Promise<string>;
   getSessionUserId: () => Promise<string>;
   invokeScanCard: (params: { imagePath: string; leadId: string; rawText: string; teamId?: string | null }) => Promise<InvokeScanCardResponse>;
   uploadCardImage: (localPath: string, leadId: string) => Promise<string>;
@@ -149,13 +150,15 @@ function isRetryableError(error: unknown): boolean {
 
 export function createDefaultScanPipelineDeps(): ScanPipelineDeps {
   const { invokeScanCard } = require('./scanCard') as typeof import('./scanCard');
+  const { extractText } = require('../../lib/ocr') as typeof import('../../lib/ocr');
 
   return {
     archiveImage: async (imagePath, leadId) => {
-      const historyDirectory = `${FileSystem.documentDirectory ?? ''}history/`;
-      if (!FileSystem.documentDirectory) {
-        throw new Error('Document directory unavailable');
+      const cacheDirectory = FileSystem.cacheDirectory;
+      if (!cacheDirectory) {
+        throw new Error('Cache directory unavailable');
       }
+      const historyDirectory = `${cacheDirectory}history/`;
 
       await FileSystem.makeDirectoryAsync(historyDirectory, { intermediates: true });
 
@@ -171,6 +174,7 @@ export function createDefaultScanPipelineDeps(): ScanPipelineDeps {
     deleteImage: async (imagePath) => {
       await FileSystem.deleteAsync(imagePath, { idempotent: true });
     },
+    extractText,
     getSessionUserId: async () => {
       const { data, error } = await supabase.auth.getSession();
       const userId = data.session?.user.id;
@@ -216,13 +220,21 @@ export function createScanPipeline(deps: ScanPipelineDeps) {
           throw new Error('Queue item missing storagePath');
         }
 
+        const rawText = parsingItem.rawText
+          ?? await (deps.extractText
+            ? deps.extractText(parsingItem.imagePath)
+            : Promise.reject(new Error('Queue item missing rawText and OCR extractor')));
+        if (!rawText) {
+          throw new Error('Queue item missing rawText');
+        }
+
         const archivedImagePath = await deps.archiveImage(parsingItem.imagePath, parsingItem.id);
 
         const scanResult = await deps.invokeScanCard({
           teamId: parsingItem.teamId ?? null,
           imagePath: parsingItem.storagePath,
           leadId: parsingItem.id,
-          rawText: parsingItem.rawText
+          rawText
         });
 
         api.recordHistory({
@@ -230,7 +242,7 @@ export function createScanPipeline(deps: ScanPipelineDeps) {
           imagePath: archivedImagePath,
           parsed: scanResult.parsed,
           parseStatus: scanResult.parseStatus,
-          rawText: parsingItem.rawText,
+          rawText,
           storagePath: parsingItem.storagePath
         });
 

@@ -89,7 +89,6 @@ describe('scanner queue store', () => {
     expect(scannerQueueStore.getState().queue).toMatchObject([
       {
         id: 'lead-user-1',
-        rawText: 'User one',
         status: 'uploading'
       }
     ]);
@@ -98,7 +97,6 @@ describe('scanner queue store', () => {
     expect(scannerQueueStore.getState().queue).toMatchObject([
       {
         id: 'lead-user-2',
-        rawText: 'User two',
         status: 'uploading'
       }
     ]);

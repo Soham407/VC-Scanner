@@ -1,18 +1,9 @@
-import * as FileSystem from 'expo-file-system/legacy';
-
 import { supabase } from './supabase';
 
 const CARD_IMAGES_BUCKET = 'card-images';
 
-function base64ToUint8Array(base64: string): Uint8Array {
-  const binaryString = globalThis.atob(base64);
-  const bytes = new Uint8Array(binaryString.length);
-
-  for (let index = 0; index < binaryString.length; index += 1) {
-    bytes[index] = binaryString.charCodeAt(index);
-  }
-
-  return bytes;
+function normalizeStoragePath(path: string): string {
+  return path.startsWith(`${CARD_IMAGES_BUCKET}/`) ? path.slice(CARD_IMAGES_BUCKET.length + 1) : path;
 }
 
 export async function uploadCardImage(localPath: string, leadId: string): Promise<string> {
@@ -23,21 +14,13 @@ export async function uploadCardImage(localPath: string, leadId: string): Promis
   }
 
   const ownerPath = `${data.user.id}/${leadId}.jpg`;
-
-  const base64Image = await FileSystem.readAsStringAsync(localPath, {
-    encoding: FileSystem.EncodingType.Base64
-  });
-
-  if (!base64Image) {
+  const imageResponse = await fetch(localPath);
+  if (!imageResponse.ok) {
     throw new Error(`Failed to read local image from path: ${localPath}`);
   }
 
-  const imageBytes = base64ToUint8Array(base64Image);
-  const imageBuffer = imageBytes.buffer.slice(
-    imageBytes.byteOffset,
-    imageBytes.byteOffset + imageBytes.byteLength
-  ) as ArrayBuffer;
-  const { error: uploadError } = await supabase.storage.from(CARD_IMAGES_BUCKET).upload(ownerPath, imageBuffer, {
+  const imageBlob = await imageResponse.blob();
+  const { error: uploadError } = await supabase.storage.from(CARD_IMAGES_BUCKET).upload(ownerPath, imageBlob, {
     contentType: 'image/jpeg',
     upsert: false
   });
@@ -47,4 +30,20 @@ export async function uploadCardImage(localPath: string, leadId: string): Promis
   }
 
   return `${CARD_IMAGES_BUCKET}/${ownerPath}`;
+}
+
+export async function deleteCardImages(storagePaths: string[]): Promise<void> {
+  const normalizedPaths = storagePaths
+    .map((path) => path.trim())
+    .filter((path) => path.length > 0)
+    .map(normalizeStoragePath);
+
+  if (normalizedPaths.length === 0) {
+    return;
+  }
+
+  const { error } = await supabase.storage.from(CARD_IMAGES_BUCKET).remove(normalizedPaths);
+  if (error) {
+    throw new Error(error.message);
+  }
 }

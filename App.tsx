@@ -24,8 +24,6 @@ import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from 'react-native-
 import {
   Button,
   Card,
-  Chip,
-  FAB,
   IconButton,
   List,
   Snackbar,
@@ -43,7 +41,6 @@ import { type AccessibleTeam } from './src/lib/teams';
 import { type TeamWorkspaceState, useTeamWorkspace } from './src/hooks/useTeamWorkspace';
 import type { TeamMember } from './src/lib/teamMembers';
 import { CaptureButton } from './src/components/CaptureButton';
-import { AppLogo } from './src/components/AppLogo';
 import { CornerPill } from './src/components/CornerPill';
 import { MotionBottomNav } from './src/components/MotionBottomNav';
 import { PageTransitionWrapper } from './src/components/PageTransitionWrapper';
@@ -51,14 +48,15 @@ import { PermissionDeniedScreen } from './src/components/PermissionDeniedScreen'
 import { QueueSheet } from './src/components/QueueSheet';
 import { RecentScanCard } from './src/components/RecentScanCard';
 import { ScanHeroCard } from './src/components/ScanHeroCard';
-import { AnimatedStatCard } from './src/components/AnimatedStatCard';
 import { TeamAssignmentBatchSheet } from './src/components/TeamAssignmentBatchSheet';
 import { TeamReassignSheet } from './src/components/TeamReassignSheet';
 import { StatusChip, type OcrStatus } from './src/components/StatusChip';
 import { prepareImage } from './src/lib/imagePrep';
+import { consumeAuthRedirectFlow } from './src/lib/authRedirect';
 import { parseCardPreview, saveParsedCard, type ParsedCard, type ParseStatus } from './src/lib/scanCard';
 import { supabase } from './src/lib/supabase';
-import { uploadCardImage } from './src/lib/upload';
+import { deleteCardImages, uploadCardImage } from './src/lib/upload';
+import { AppPreferencesProvider, useAppPreferences } from './src/state/appPreferences';
 import { MaterialThemeProvider, useAppTheme, useMaterialThemeControls } from './src/theme/materialTheme';
 import { motion } from './src/theme/motion';
 import {
@@ -299,11 +297,11 @@ function formatCardSideRawText(sides: CapturedCardSide[]): string {
 }
 
 async function archiveReviewedImage(cachePath: string, leadId: string): Promise<string> {
-  if (!FileSystem.documentDirectory) {
+  if (!FileSystem.cacheDirectory) {
     return cachePath;
   }
 
-  const historyDirectory = `${FileSystem.documentDirectory}history/`;
+  const historyDirectory = `${FileSystem.cacheDirectory}history/`;
   await FileSystem.makeDirectoryAsync(historyDirectory, { intermediates: true });
 
   const archivedPath = `${historyDirectory}lead-${leadId}.jpg`;
@@ -329,7 +327,7 @@ async function updateExistingReviewedLead(leadId: string, parsed: ParsedCard): P
     });
     return;
   } catch {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('scanned_leads')
       .update({
         address: parsed.address,
@@ -341,12 +339,105 @@ async function updateExistingReviewedLead(leadId: string, parsed: ParsedCard): P
         phone_number: parsed.phoneNumber,
         product_services: parsed.productServices
       })
-      .eq('id', leadId);
+      .eq('id', leadId)
+      .select('id')
+      .maybeSingle();
 
     if (error) {
       throw error;
     }
+
+    if (!data) {
+      throw new Error('Reviewed lead does not exist in cloud storage');
+    }
   }
+}
+
+async function cleanupLocalCardImages(paths: string[]): Promise<void> {
+  await Promise.all(paths.map((path) => FileSystem.deleteAsync(path, { idempotent: true })));
+}
+
+async function cleanupRemoteCardImages(paths: string[]): Promise<void> {
+  try {
+    await deleteCardImages(paths);
+  } catch (error) {
+    console.warn('Card image cleanup failed', error);
+  }
+}
+
+async function createSignedCardImageUrl(path: string | null): Promise<string> {
+  if (!path) {
+    return '';
+  }
+
+  const storagePath = path.startsWith('card-images/') ? path.slice('card-images/'.length) : path;
+  const { data, error } = await supabase.storage.from('card-images').createSignedUrl(storagePath, 60 * 15);
+  if (error || !data?.signedUrl) {
+    return '';
+  }
+
+  return data.signedUrl;
+}
+
+async function loadCloudPersonalHistory(userId: string): Promise<ScannerHistoryItem[]> {
+  const { data, error } = await supabase
+    .from('scanned_leads')
+    .select(`
+      id,
+      address,
+      company_name,
+      created_at,
+      email,
+      full_name,
+      image_url,
+      job_title,
+      parse_status,
+      phone_number,
+      product_services,
+      raw_ocr_text
+    `)
+    .eq('user_id', userId)
+    .is('team_id', null)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  const rows = (data ?? []) as Array<{
+    address: string | null;
+    company_name: string | null;
+    created_at: string;
+    email: string | null;
+    full_name: string | null;
+    id: string;
+    image_url: string | null;
+    job_title: string | null;
+    parse_status: ParseStatus;
+    phone_number: string | null;
+    product_services: string | null;
+    raw_ocr_text: string | null;
+  }>;
+
+  const signedUrls = await Promise.all(rows.map((row) => createSignedCardImageUrl(row.image_url)));
+
+  return rows.map((row, index) => ({
+    id: row.id,
+    imagePath: signedUrls[index] || '',
+    parsed: {
+      address: row.address,
+      companyName: row.company_name,
+      email: row.email,
+      fullName: row.full_name,
+      jobTitle: row.job_title,
+      phoneNumber: row.phone_number,
+      productServices: row.product_services
+    },
+    parseStatus: row.parse_status,
+    rawText: row.raw_ocr_text ?? '',
+    savedAt: Date.parse(row.created_at),
+    storagePath: row.image_url ?? ''
+  }));
 }
 
 const routes: Array<{
@@ -368,6 +459,40 @@ type MetricRailItem = {
   tone?: MetricTone;
   value: number;
 };
+
+function PageHeader({
+  actions,
+  kicker,
+  status,
+  summary,
+  title
+}: {
+  actions?: React.ReactNode;
+  kicker: string;
+  status?: OcrStatus;
+  summary: string;
+  title: string;
+}) {
+  const theme = useAppTheme();
+
+  return (
+    <Surface elevation={2} style={[styles.pageHeader, { backgroundColor: theme.colors.surface }]}>
+      <View style={styles.pageHeaderTopRow}>
+        <View style={styles.pageHeaderCopy}>
+          <Text style={[styles.screenKicker, { color: theme.colors.primary }]} variant="labelSmall">
+            {kicker}
+          </Text>
+          <Text variant="headlineMedium">{title}</Text>
+        </View>
+        {status ? <StatusChip status={status} /> : null}
+      </View>
+      <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 8 }} variant="bodyMedium">
+        {summary}
+      </Text>
+      {actions ? <View style={styles.pageHeaderActions}>{actions}</View> : null}
+    </Surface>
+  );
+}
 
 function createUuid(): string {
   const randomUuid = globalThis.crypto?.randomUUID;
@@ -565,11 +690,6 @@ function HistoryScreen({
     return true;
   });
   const title = mode === 'leader-inbox' ? 'Team Inbox' : isPersonalHistory ? 'History' : 'Assignments';
-  const subtitle = mode === 'leader-inbox'
-    ? 'Review team scans, select cards, and assign them to Workers.'
-    : isPersonalHistory
-      ? 'Every card saved by your account appears here.'
-      : 'Cards assigned to you for follow-up appear here.';
   const availableFilters = mode === 'leader-inbox'
     ? [
         { count: items.length, label: 'All', value: 'all' as const },
@@ -583,56 +703,25 @@ function HistoryScreen({
         { count: parsedCount, label: 'Ready', value: 'saved' as const },
         { count: items.length - parsedCount, label: 'Review', value: 'needs-review' as const }
       ];
+  const headerSummary = mode === 'leader-inbox'
+    ? `${items.length} cards · ${unassignedCount} open`
+    : isPersonalHistory
+      ? `${items.length} cards saved`
+      : `${items.length} assigned · ${reviewCount} need review`;
 
   return (
     <ScreenShell>
       <Animated.View entering={FadeInUp.duration(motion.duration.medium2).easing(motion.easing.emphasized)}>
-        <Surface
-          elevation={2}
-          style={[styles.historyHero, { backgroundColor: theme.colors.surfaceContainerHigh }]}
-        >
-          <View style={styles.historyHeroCopy}>
-            <Text style={styles.screenKicker} variant="labelSmall">
-              {mode === 'leader-inbox' ? 'Team Leader' : isPersonalHistory ? 'My scans' : 'My assignments'}
-            </Text>
-            <Text variant="headlineMedium">{title}</Text>
-            <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }} variant="bodyMedium">
-              {subtitle}
-            </Text>
-            {teamName ? (
-              <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 6 }} variant="labelLarge">
-                {teamName}
-              </Text>
-            ) : null}
-          </View>
-          <View style={styles.historyHeroActions}>
-            <View style={[styles.historyHeroBadge, { backgroundColor: theme.colors.surfaceContainerHighest }]}>
-              <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelSmall">
-                {mode === 'leader-inbox' ? 'Leader view' : isPersonalHistory ? 'Personal' : 'Worker view'}
-              </Text>
-            </View>
+        <PageHeader
+          actions={(
             <Button icon="camera" mode="contained" onPress={onOpenCamera} testID="history-empty-scan-button">
-              Scan card
+              Scan
             </Button>
-          </View>
-        </Surface>
-      </Animated.View>
-
-      <Animated.View entering={FadeInDown.delay(110).duration(motion.duration.medium1).easing(motion.easing.emphasized)}>
-        <MetricRail
-          items={
-            mode === 'leader-inbox'
-              ? [
-                  { label: 'Cards', tone: 'default', value: items.length },
-                  { label: 'Open', tone: 'tertiary', value: unassignedCount },
-                  { label: 'Assigned', tone: 'secondary', value: assignedCount }
-                ]
-              : [
-                  { label: 'Cards', tone: 'default', value: items.length },
-                  { label: 'Ready', tone: 'tertiary', value: parsedCount },
-                  { label: 'Review', tone: 'secondary', value: items.length - parsedCount }
-                ]
-          }
+          )}
+          kicker={mode === 'leader-inbox' ? (teamName ?? 'Team workspace') : isPersonalHistory ? 'Personal workspace' : (teamName ?? 'Team workspace')}
+          status={mode === 'leader-inbox' ? 'parsed' : items.length > 0 ? 'parsed' : 'idle'}
+          summary={teamName ? `${headerSummary} · ${teamName}` : headerSummary}
+          title={title}
         />
       </Animated.View>
       {mode === 'leader-inbox' ? (
@@ -870,15 +959,16 @@ function AssignmentDetailScreen({
   if (confirmNeedsReview) {
     return (
       <ScreenShell>
-        <Surface elevation={2} style={[styles.detailHero, { backgroundColor: theme.colors.surfaceContainerHigh }]}>
-          <Text style={styles.screenKicker} variant="labelSmall">
-            Needs review
-          </Text>
-          <Text variant="headlineSmall">Mark as needs review?</Text>
-          <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
-            Use this when details are missing or a Team Leader should check the card.
-          </Text>
-        </Surface>
+        <PageHeader
+          actions={(
+            <Button compact icon="arrow-left" mode="text" onPress={() => setConfirmNeedsReview(false)}>
+              Back
+            </Button>
+          )}
+          kicker="Assignment"
+          summary="Send this card back for a leader check."
+          title="Mark as needs review?"
+        />
         <Surface elevation={1} style={[styles.detailPanel, { backgroundColor: theme.colors.surfaceContainer }]}>
           <DetailField label="Assignment" value={getTeamInboxItemTitle(item)} />
           <DetailField label="Assigned to" value={getMemberLabel(memberLabel)} />
@@ -906,25 +996,17 @@ function AssignmentDetailScreen({
 
   return (
     <ScreenShell>
-      <Surface elevation={2} style={[styles.detailHero, { backgroundColor: theme.colors.surfaceContainerHigh }]}>
-        <View style={styles.detailHeroTopRow}>
+      <PageHeader
+        actions={(
           <Button compact icon="arrow-left" mode="text" onPress={onBack}>
             Back
           </Button>
-          <View style={[styles.historyHeroBadge, { backgroundColor: theme.colors.surfaceContainerHighest }]}>
-            <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelSmall">
-              {isPersonalHistory ? 'Personal scan' : item.assignmentState ? 'Assigned card' : 'Team inbox'}
-            </Text>
-          </View>
-        </View>
-        <Text style={styles.screenKicker} variant="labelSmall">
-          {isPersonalHistory ? 'Saved card' : item.assignmentState ? 'Assigned card' : 'New card'}
-        </Text>
-        <Text variant="headlineSmall">{getTeamInboxItemTitle(item)}</Text>
-        <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
-          {getTeamInboxItemSubtitle(item)}
-        </Text>
-      </Surface>
+        )}
+        kicker={isPersonalHistory ? 'Saved card' : item.assignmentState ? 'Assigned card' : 'Team inbox'}
+        status={item.parseStatus === 'parsed' ? 'parsed' : 'idle'}
+        summary={getTeamInboxItemSubtitle(item)}
+        title={getTeamInboxItemTitle(item)}
+      />
 
       <Surface elevation={1} style={[styles.detailPanel, { backgroundColor: theme.colors.surfaceContainer }]}>
         {isEditing ? (
@@ -1117,15 +1199,16 @@ function CardCaptureModeScreen({
 
   return (
     <ScreenShell>
-      <Surface elevation={2} style={[styles.detailHero, { backgroundColor: theme.colors.surfaceContainerHigh }]}>
-        <Text style={styles.screenKicker} variant="labelSmall">
-          {activeTeamName ?? 'Personal scan'}
-        </Text>
-        <Text variant="headlineSmall">Choose card capture type</Text>
-        <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
-          Use double-sided when important details may be printed on the back of the visiting card.
-        </Text>
-      </Surface>
+      <PageHeader
+        actions={(
+          <Button mode="outlined" onPress={onCancel}>
+            Cancel
+          </Button>
+        )}
+        kicker={activeTeamName ?? 'Personal workspace'}
+        summary="Use double-sided only when important details are printed on the back."
+        title="Choose capture type"
+      />
 
       <Surface elevation={1} style={[styles.captureModePanel, { backgroundColor: theme.colors.surfaceContainer }]}>
         <Pressable
@@ -1175,11 +1258,6 @@ function CardCaptureModeScreen({
         </Pressable>
       </Surface>
 
-      <View style={styles.detailActions}>
-        <Button mode="outlined" onPress={onCancel}>
-          Cancel
-        </Button>
-      </View>
     </ScreenShell>
   );
 }
@@ -1204,27 +1282,21 @@ function BatchApprovalConfirmScreen({
 
   return (
     <ScreenShell>
-      <Surface elevation={2} style={[styles.detailHero, { backgroundColor: theme.colors.surfaceContainerHigh }]}>
-        <Text style={styles.screenKicker} variant="labelSmall">
-          Final approval
-        </Text>
-        <Text variant="headlineSmall">Assign {scanCount} card{scanCount === 1 ? '' : 's'}?</Text>
-        <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
-          Cards are shuffled before approval, then split by the worker counts you set.
-        </Text>
-      </Surface>
-      <MetricRail
-        items={[
-          { label: 'Scans', value: scanCount },
-          { label: 'Members', tone: 'tertiary', value: workerCount },
-          { label: 'Ready', tone: 'secondary', value: assignedCount === scanCount ? 1 : 0 }
-        ]}
+      <PageHeader
+        actions={(
+          <Button compact icon="arrow-left" mode="text" onPress={onBack}>
+            Back
+          </Button>
+        )}
+        kicker="Final approval"
+        summary={`${scanCount} cards · ${workerCount} workers · ${assignedCount}/${scanCount} allocated`}
+        title={`Assign ${scanCount} card${scanCount === 1 ? '' : 's'}?`}
       />
       <Surface elevation={1} style={[styles.allocationPreviewPanel, { backgroundColor: theme.colors.surfaceContainer }]}>
         <View style={styles.teamSectionHeader}>
           <Text variant="titleMedium">Worker split</Text>
-          <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
-            Total assigned: {assignedCount}/{scanCount}
+          <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelMedium">
+            {assignedCount}/{scanCount}
           </Text>
         </View>
         <View style={styles.memberList}>
@@ -1323,39 +1395,12 @@ function ParsedCardReviewScreen({
 
   return (
     <ScreenShell>
-      <Surface elevation={2} style={[styles.parsedReviewHero, { backgroundColor: theme.colors.surfaceContainerHigh }]}>
-        <View style={styles.parsedReviewHeroTopRow}>
-          <View style={[styles.parsedReviewHeroIcon, { backgroundColor: theme.colors.primaryContainer }]}>
-            <MaterialCommunityIcons color={theme.colors.onPrimaryContainer} name="text-recognition" size={26} />
-          </View>
-          <Chip compact icon="account-multiple-outline" mode="outlined">
-            {activeTeamName ?? 'Personal scan'}
-          </Chip>
-        </View>
-        <View style={styles.parsedReviewHeroCopy}>
-          <Text style={styles.screenKicker} variant="labelSmall">
-            Card parsed
-          </Text>
-          <Text variant="headlineSmall">Review parsed fields</Text>
-          <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
-            Place each text block in the right field. Tap a block to select it, then use a drop target.
-          </Text>
-        </View>
-        <View style={styles.parsedReviewStats}>
-          <View style={[styles.parsedReviewStatPill, { backgroundColor: theme.colors.surfaceContainerHighest }]}>
-            <Text variant="titleMedium">{assignedBlockCount}</Text>
-            <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelSmall">
-              Placed
-            </Text>
-          </View>
-          <View style={[styles.parsedReviewStatPill, { backgroundColor: theme.colors.surfaceContainerHighest }]}>
-            <Text variant="titleMedium">{extraBlockCount}</Text>
-            <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelSmall">
-              Extra
-            </Text>
-          </View>
-        </View>
-      </Surface>
+      <PageHeader
+        kicker={activeTeamName ?? 'Personal workspace'}
+        status={isSaving ? 'saving' : 'parsed'}
+        summary={`${assignedBlockCount} placed · ${extraBlockCount} extra text blocks`}
+        title="Review parsed fields"
+      />
 
       {selectedBlock ? (
         <Surface
@@ -1387,9 +1432,6 @@ function ParsedCardReviewScreen({
         <View style={styles.parsedReviewSectionHeader}>
           <View>
             <Text variant="titleMedium">Contact fields</Text>
-            <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
-              Parsed values are editable. Blocks below each field show where the text came from.
-            </Text>
           </View>
         </View>
         {parsedCardFields.map((field) => (
@@ -1721,6 +1763,7 @@ function TeamScreen({
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [memberError, setMemberError] = useState<string | null>(null);
   const [promotingMemberId, setPromotingMemberId] = useState<string | null>(null);
+  const canManageTeam = team?.createdBy === currentUserId || members.some((member) => member.userId === currentUserId && member.isLeader);
 
   const handleCreateInvite = () => {
     const trimmedEmail = inviteEmail.trim();
@@ -1748,136 +1791,91 @@ function TeamScreen({
   return (
     <ScreenShell>
       <Animated.View entering={FadeInUp.duration(motion.duration.medium2).easing(motion.easing.emphasized)}>
-        <Surface
-          elevation={2}
-          style={[styles.profileHero, { backgroundColor: theme.colors.surfaceContainerHigh }]}
-        >
-          <View style={[styles.profileAvatar, { backgroundColor: theme.colors.tertiaryContainer }]}>
-            <List.Icon color={theme.colors.onTertiaryContainer} icon="account-group" />
-          </View>
-          <View style={styles.profileHeroCopy}>
-            <Text style={styles.screenKicker} variant="labelSmall">
-              Team
-            </Text>
-            <Text variant="headlineMedium">{team?.name ?? 'Team'}</Text>
-            <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
-              Manage members, invites, and worker assignments for this company team.
-            </Text>
-          </View>
-          <View style={styles.profileStatusWrap}>
-            <StatusChip status={hasTeam ? 'parsed' : 'idle'} />
-          </View>
-        </Surface>
+        <PageHeader
+          kicker="Team workspace"
+          status={hasTeam ? 'parsed' : 'idle'}
+          summary={hasTeam ? `${members.length} members · ${leaderCount} leaders · ${workerCount} workers` : 'No team set up yet.'}
+          title={team?.name ?? 'Team'}
+        />
       </Animated.View>
 
       {hasTeam ? (
-        <Animated.View entering={FadeInDown.delay(110).duration(motion.duration.medium1).easing(motion.easing.emphasized)}>
-          <View style={styles.teamStatsRow}>
-            <AnimatedStatCard delay={0} label="Members" value={members.length} />
-            <AnimatedStatCard delay={60} label="Workers" value={workerCount} />
-            <AnimatedStatCard delay={120} label="Leaders" value={leaderCount} />
-          </View>
-        </Animated.View>
-      ) : null}
-
-      {hasTeam ? (
         <>
-          <Animated.View entering={FadeInDown.delay(200).duration(motion.duration.medium1).easing(motion.easing.emphasized)}>
-            <Surface
-              elevation={1}
-              style={[styles.teamSummaryPanel, { backgroundColor: theme.colors.surfaceContainer }]}
-            >
-              <View style={styles.teamSectionHeader}>
-                <Text variant="titleMedium">Company team</Text>
-                <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
-                  {team ? `Created by ${team.createdBy === currentUserId ? 'you' : 'another leader'}` : 'No team loaded.'}
-                </Text>
-              </View>
-              <Button compact mode="contained-tonal" disabled={!team}>
-                {team ? 'Current team' : 'No team'}
-              </Button>
-            </Surface>
-          </Animated.View>
-
-          <Animated.View entering={FadeInDown.delay(230).duration(motion.duration.medium1).easing(motion.easing.emphasized)}>
-            <Surface
-              elevation={1}
-              style={[styles.managementPanel, { backgroundColor: theme.colors.surfaceContainer }]}
-            >
-              <View style={styles.teamSectionHeader}>
-                <Text variant="titleMedium">Pending invite</Text>
-                <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
-                  Send access to someone who should join this team.
-                </Text>
-              </View>
-              <TextInput
-                autoCapitalize="none"
-                autoComplete="email"
-                keyboardType="email-address"
-                label="Invite email"
-                mode="outlined"
-                onChangeText={(value) => {
-                  setInviteEmail(value);
-                  setInviteError(null);
-                }}
-                placeholder="worker@example.com"
-                testID="invite-email-input"
-                value={inviteEmail}
-              />
-              <Button
-                disabled={isInviteCreationLoading || !team || !inviteEmail.trim()}
-                loading={isInviteCreationLoading}
-                mode="contained"
-                onPress={handleCreateInvite}
-                testID="create-invite-button"
+          {canManageTeam ? (
+            <Animated.View entering={FadeInDown.delay(200).duration(motion.duration.medium1).easing(motion.easing.emphasized)}>
+              <Surface
+                elevation={1}
+                style={[styles.managementPanel, { backgroundColor: theme.colors.surfaceContainer }]}
               >
-                Send invite
-              </Button>
-              {inviteError ? (
-                <Text style={{ color: theme.colors.error }} variant="bodySmall">
-                  {inviteError}
-                </Text>
-              ) : null}
-              {memberError ? (
-                <Text style={{ color: theme.colors.error }} variant="bodySmall">
-                  {memberError}
-                </Text>
-              ) : null}
-              {teamPendingInvites.length > 0 ? (
-                <View style={styles.memberList}>
-                  <Text variant="titleSmall">Pending invites</Text>
-                  {teamPendingInvites.map((invite) => (
-                    <Surface
-                      key={invite.id}
-                      elevation={0}
-                      style={[styles.memberRow, { backgroundColor: theme.colors.surfaceContainerHighest }]}
-                    >
-                      <View style={styles.memberRowCopy}>
-                        <Text variant="titleSmall">{invite.invitedEmail}</Text>
-                        <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
-                          Pending team invite
-                        </Text>
-                      </View>
-                      <Button compact disabled mode="outlined">
-                        Pending
-                      </Button>
-                    </Surface>
-                  ))}
+                <View style={styles.teamSectionHeader}>
+                  <Text variant="titleMedium">Pending invite</Text>
                 </View>
-              ) : null}
-            </Surface>
-          </Animated.View>
+                <TextInput
+                  autoCapitalize="none"
+                  autoComplete="email"
+                  keyboardType="email-address"
+                  label="Invite email"
+                  mode="outlined"
+                  onChangeText={(value) => {
+                    setInviteEmail(value);
+                    setInviteError(null);
+                  }}
+                  placeholder="worker@example.com"
+                  testID="invite-email-input"
+                  value={inviteEmail}
+                />
+                <Button
+                  disabled={isInviteCreationLoading || !team || !inviteEmail.trim()}
+                  loading={isInviteCreationLoading}
+                  mode="contained"
+                  onPress={handleCreateInvite}
+                  testID="create-invite-button"
+                >
+                  Send invite
+                </Button>
+                {inviteError ? (
+                  <Text style={{ color: theme.colors.error }} variant="bodySmall">
+                    {inviteError}
+                  </Text>
+                ) : null}
+                {memberError ? (
+                  <Text style={{ color: theme.colors.error }} variant="bodySmall">
+                    {memberError}
+                  </Text>
+                ) : null}
+                {teamPendingInvites.length > 0 ? (
+                  <View style={styles.memberList}>
+                    <Text variant="titleSmall">Pending invites</Text>
+                    {teamPendingInvites.map((invite) => (
+                      <Surface
+                        key={invite.id}
+                        elevation={0}
+                        style={[styles.memberRow, { backgroundColor: theme.colors.surfaceContainerHighest }]}
+                      >
+                        <View style={styles.memberRowCopy}>
+                          <Text variant="titleSmall">{invite.invitedEmail}</Text>
+                          <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
+                            Pending team invite
+                          </Text>
+                        </View>
+                        <Button compact disabled mode="outlined">
+                          Pending
+                        </Button>
+                      </Surface>
+                    ))}
+                  </View>
+                ) : null}
+              </Surface>
+            </Animated.View>
+          ) : null}
 
-          <Animated.View entering={FadeInDown.delay(260).duration(motion.duration.medium2).easing(motion.easing.emphasized)}>
+          <Animated.View entering={FadeInDown.delay(230).duration(motion.duration.medium2).easing(motion.easing.emphasized)}>
             <Surface
               elevation={1}
               style={[styles.managementPanel, { backgroundColor: theme.colors.surfaceContainer }]}
             >
               <View style={styles.teamSectionHeader}>
                 <Text variant="titleMedium">Members</Text>
-                <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
-                  Promote members to Team Leaders and track who has access.
-                </Text>
               </View>
               {isTeamMembersLoading ? (
                 <ActivityIndicator />
@@ -1886,7 +1884,13 @@ function TeamScreen({
                   No members found.
                 </Text>
               ) : (
-                <View style={styles.memberList}>
+                <ScrollView
+                  nestedScrollEnabled
+                  showsVerticalScrollIndicator={false}
+                  style={styles.memberListScroll}
+                  contentContainerStyle={styles.memberList}
+                  testID="team-members-scroll"
+                >
                   {members.map((member) => {
                     const isSelf = member.userId === currentUserId;
                     return (
@@ -1899,59 +1903,42 @@ function TeamScreen({
                           <Text variant="titleSmall">{member.email}</Text>
                           <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
                             {isSelf ? 'You' : 'Member'}
-                            {member.isLeader ? ' · Team Leader' : ' · Worker'}
                           </Text>
                         </View>
-                        {member.isLeader ? (
-                          <Button compact mode="outlined" disabled>
-                            Leader
+                        <View style={styles.memberActions}>
+                          <Button compact disabled mode="outlined">
+                            {member.isLeader ? 'Leader' : 'Worker'}
                           </Button>
-                        ) : (
-                          <Button
-                            compact
-                            disabled={Boolean(promotingMemberId)}
-                            loading={promotingMemberId === member.userId}
-                            mode="text"
-                            onPress={() => {
-                              setPromotingMemberId(member.userId);
-                              setMemberError(null);
-                              void onPromoteMember(member.userId)
-                                .catch((error) => {
-                                  setMemberError(error instanceof Error ? error.message : 'Promotion failed');
-                                })
-                                .finally(() => setPromotingMemberId(null));
-                            }}
-                          >
-                            Promote
-                          </Button>
-                        )}
+                          {canManageTeam && !member.isLeader ? (
+                            <Button
+                              compact
+                              disabled={Boolean(promotingMemberId)}
+                              loading={promotingMemberId === member.userId}
+                              mode="text"
+                              onPress={() => {
+                                setPromotingMemberId(member.userId);
+                                setMemberError(null);
+                                void onPromoteMember(member.userId)
+                                  .catch((error) => {
+                                    setMemberError(error instanceof Error ? error.message : 'Promotion failed');
+                                  })
+                                  .finally(() => setPromotingMemberId(null));
+                              }}
+                            >
+                              Promote
+                            </Button>
+                          ) : null}
+                        </View>
                       </Surface>
                     );
                   })}
-                </View>
+                </ScrollView>
               )}
               {memberError ? (
                 <Text style={{ color: theme.colors.error }} variant="bodySmall">
                   {memberError}
                 </Text>
               ) : null}
-            </Surface>
-          </Animated.View>
-
-          <Animated.View entering={FadeInDown.delay(290).duration(motion.duration.medium1).easing(motion.easing.emphasized)}>
-            <Surface
-              elevation={1}
-              style={[styles.managementPanel, { backgroundColor: theme.colors.surfaceContainer }]}
-            >
-              <View style={styles.teamSectionHeader}>
-                <Text variant="titleMedium">Team details</Text>
-                <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
-                  {team ? `Team ID: ${team.id}` : 'No team loaded.'}
-                </Text>
-              </View>
-              <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
-                All scans enter the team inbox first. Team Leaders can review scans, but only workers receive assignments.
-              </Text>
             </Surface>
           </Animated.View>
 
@@ -1976,6 +1963,12 @@ function ProfileScreen({
 }) {
   const theme = useAppTheme();
   const { colorMode, toggleColorMode } = useMaterialThemeControls();
+  const {
+    afterSaveBehavior,
+    preferredScanMode,
+    setAfterSaveBehavior,
+    setPreferredScanMode
+  } = useAppPreferences();
   const history = useScannerQueueStore((state) => state.history);
   const queue = useScannerQueueStore((state) => state.queue);
   const [teamName, setTeamName] = useState('');
@@ -2006,62 +1999,22 @@ function ProfileScreen({
   return (
     <ScreenShell>
       <Animated.View entering={FadeInUp.duration(motion.duration.medium2).easing(motion.easing.emphasized)}>
-        <Surface
-          elevation={2}
-          style={[styles.profileHero, { backgroundColor: theme.colors.surfaceContainerHigh }]}
-        >
-          <AppLogo compact size={60} variant="mark" />
-          <View style={styles.profileHeroCopy}>
-            <Text style={styles.screenKicker} variant="labelSmall">
-              Account
-            </Text>
-            <Text variant="headlineMedium">Profile</Text>
-            <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
-              Signed in as {userEmail ?? 'your account'}.
-            </Text>
-          </View>
-          <View style={styles.profileStatusWrap}>
-            <StatusChip status={failedCount > 0 ? 'failed' : inFlightCount > 0 ? 'saving' : parsedCount > 0 ? 'parsed' : 'idle'} />
-          </View>
-        </Surface>
-      </Animated.View>
-
-      <Animated.View entering={FadeInDown.delay(110).duration(motion.duration.medium1).easing(motion.easing.emphasized)}>
-        <MetricRail
-          items={[
-            { label: 'Saved', tone: 'default', value: history.length },
-            { label: 'Ready', tone: 'tertiary', value: parsedCount },
-            { label: 'Saving', tone: 'secondary', value: inFlightCount }
-          ]}
+        <PageHeader
+          kicker="Account"
+          status={failedCount > 0 ? 'failed' : inFlightCount > 0 ? 'saving' : parsedCount > 0 ? 'parsed' : 'idle'}
+          summary={userEmail ?? 'your account'}
+          title="Profile"
         />
       </Animated.View>
 
       <Animated.View entering={FadeInDown.delay(160).duration(motion.duration.medium2).easing(motion.easing.emphasized)}>
-        {hasTeamWorkspace ? (
-          <Surface
-            elevation={1}
-            style={[styles.managementPanel, { backgroundColor: theme.colors.surfaceContainer }]}
-          >
-            <View style={styles.teamSectionHeader}>
-              <Text variant="titleMedium">Team setup</Text>
-              <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
-                This account already belongs to a company team. Create a team only for new company accounts.
-              </Text>
-            </View>
-            <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
-              Team creation is disabled once a membership exists.
-            </Text>
-          </Surface>
-        ) : (
+        {!hasTeamWorkspace ? (
           <Surface
             elevation={1}
             style={[styles.managementPanel, { backgroundColor: theme.colors.surfaceContainer }]}
           >
             <View style={styles.teamSectionHeader}>
               <Text variant="titleMedium">Create your first team</Text>
-              <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
-                Create a team only when you want shared scanning, invites, and assignments.
-              </Text>
             </View>
             <TextInput
               label="Team name"
@@ -2089,7 +2042,7 @@ function ProfileScreen({
               </Text>
             ) : null}
           </Surface>
-        )}
+        ) : null}
       </Animated.View>
 
       <Animated.View entering={FadeInDown.delay(210).duration(motion.duration.medium2).easing(motion.easing.emphasized)}>
@@ -2099,9 +2052,6 @@ function ProfileScreen({
         >
           <View>
             <Text variant="titleMedium">Appearance</Text>
-            <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }} variant="bodyMedium">
-              Switch between light and dark color modes.
-            </Text>
           </View>
           <View style={styles.colorModeRow}>
             <View style={styles.colorModePill}>
@@ -2122,35 +2072,50 @@ function ProfileScreen({
         </Surface>
       </Animated.View>
 
+      <Animated.View entering={FadeInDown.delay(235).duration(motion.duration.medium2).easing(motion.easing.emphasized)}>
+        <Surface
+          elevation={1}
+          style={[styles.palettePanel, { backgroundColor: theme.colors.surfaceContainer }]}
+        >
+          <View style={styles.settingsSectionHeader}>
+            <Text variant="titleMedium">Scanning</Text>
+          </View>
+          <View style={styles.settingsGroup}>
+            <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelMedium">
+              Scan start mode
+            </Text>
+            <View style={styles.settingsOptionsRow}>
+              <Button compact mode={preferredScanMode === 'ask' ? 'contained-tonal' : 'outlined'} onPress={() => setPreferredScanMode('ask')}>
+                Ask
+              </Button>
+              <Button compact mode={preferredScanMode === 'singleSided' ? 'contained-tonal' : 'outlined'} onPress={() => setPreferredScanMode('singleSided')}>
+                Single
+              </Button>
+              <Button compact mode={preferredScanMode === 'doubleSided' ? 'contained-tonal' : 'outlined'} onPress={() => setPreferredScanMode('doubleSided')}>
+                Double
+              </Button>
+            </View>
+          </View>
+          <View style={styles.settingsGroup}>
+            <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelMedium">
+              After save
+            </Text>
+            <View style={styles.settingsOptionsRow}>
+              <Button compact mode={afterSaveBehavior === 'dashboard' ? 'contained-tonal' : 'outlined'} onPress={() => setAfterSaveBehavior('dashboard')}>
+                Dashboard
+              </Button>
+              <Button compact mode={afterSaveBehavior === 'scan-again' ? 'contained-tonal' : 'outlined'} onPress={() => setAfterSaveBehavior('scan-again')}>
+                Scan again
+              </Button>
+            </View>
+          </View>
+        </Surface>
+      </Animated.View>
+
       <Animated.View entering={FadeInDown.delay(260).duration(motion.duration.medium1).easing(motion.easing.emphasized)}>
         <Button icon="logout" mode="outlined" onPress={onSignOut}>
           Sign out
         </Button>
-      </Animated.View>
-
-      <Animated.View entering={FadeInDown.delay(310).duration(motion.duration.medium2).easing(motion.easing.emphasized)}>
-        <Surface
-          elevation={1}
-          style={[styles.profileAccountPanel, { backgroundColor: theme.colors.surfaceContainer }]}
-        >
-          <View>
-            <Text variant="titleMedium">Account</Text>
-            <Text style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }} variant="bodyMedium">
-              Saved cards stay tied to this profile. Sign out only when you want to switch accounts.
-            </Text>
-          </View>
-          <View style={styles.profileAccountInfo}>
-            <View style={[styles.profileSettingIcon, { backgroundColor: theme.colors.primaryContainer }]}>
-              <List.Icon color={theme.colors.onPrimaryContainer} icon="email-outline" />
-            </View>
-            <View style={styles.profileSettingCopy}>
-              <Text variant="labelMedium" style={{ color: theme.colors.onSurfaceVariant }}>
-                Signed in as
-              </Text>
-              <Text variant="titleMedium">{userEmail ?? 'your account'}</Text>
-            </View>
-          </View>
-        </Surface>
       </Animated.View>
     </ScreenShell>
   );
@@ -2327,6 +2292,7 @@ function ScannerApp({
   workspace: TeamWorkspaceState;
   session: Session;
 }) {
+  const { afterSaveBehavior, preferredScanMode } = useAppPreferences();
   const [permission, requestPermission] = useCameraPermissions();
   const [activeTab, setActiveTab] = useState<AppTab>('dashboard');
   const [previousTabIndex, setPreviousTabIndex] = useState(0);
@@ -2483,6 +2449,41 @@ function ScannerApp({
     })();
   }, [queue, drainOnce, isConnected]);
 
+  useEffect(() => {
+    if (isConnected === false) {
+      return;
+    }
+
+    const nextAttemptAt = queue
+      .map((item) => item.nextAttemptAt)
+      .filter((value): value is number => typeof value === 'number')
+      .sort((left, right) => left - right)[0];
+
+    if (typeof nextAttemptAt !== 'number') {
+      return;
+    }
+
+    const waitMs = Math.max(nextAttemptAt - Date.now(), 0);
+    const timeoutId = setTimeout(() => {
+      if (isDrainingRef.current) {
+        return;
+      }
+
+      isDrainingRef.current = true;
+      void (async () => {
+        try {
+          await drainOnce();
+        } finally {
+          isDrainingRef.current = false;
+        }
+      })();
+    }, waitMs);
+
+    return () => {
+      clearTimeout(timeoutId);
+    };
+  }, [drainOnce, isConnected, queue]);
+
   const handleTakePicture = useCallback(async (camera: CameraView | null): Promise<string | null> => {
     if (captureLockRef.current) {
       return null;
@@ -2510,12 +2511,16 @@ function ScannerApp({
     setPreviewUri(uri);
 
     void (async () => {
+      const localCleanupPaths = new Set<string>();
+      const remoteCleanupPaths = new Set<string>();
+
       try {
         const selectedMode = captureMode ?? 'singleSided';
         const side: CardSide = selectedMode === 'doubleSided' && pendingFrontSide ? 'back' : 'front';
         const leadId = pendingFrontSide?.leadId ?? createUuid();
         const imageLeadId = selectedMode === 'doubleSided' ? `${leadId}-${side}` : leadId;
         const { cachePath } = await prepareImage(uri, imageLeadId);
+        localCleanupPaths.add(cachePath);
         if (captureGenerationRef.current !== captureGeneration) {
           return;
         }
@@ -2526,6 +2531,7 @@ function ScannerApp({
         }
 
         const storagePath = await uploadCardImage(cachePath, imageLeadId);
+        remoteCleanupPaths.add(storagePath);
         if (captureGenerationRef.current !== captureGeneration) {
           return;
         }
@@ -2542,6 +2548,8 @@ function ScannerApp({
             ...capturedSide,
             leadId
           });
+          localCleanupPaths.delete(cachePath);
+          remoteCleanupPaths.delete(storagePath);
           setPreviewUri(null);
           return;
         }
@@ -2562,6 +2570,8 @@ function ScannerApp({
           : rawText;
         const storagePaths = capturedSides.map((cardSide) => cardSide.storagePath);
         const cachePaths = capturedSides.map((cardSide) => cardSide.cachePath);
+        cachePaths.forEach((path) => localCleanupPaths.delete(path));
+        storagePaths.forEach((path) => remoteCleanupPaths.delete(path));
 
         const parsedPreview = await parseCardPreview({
           imagePath: storagePaths[0],
@@ -2588,6 +2598,9 @@ function ScannerApp({
         setPendingFrontSide(null);
         setIsCameraOpen(false);
       } catch (error) {
+        await cleanupRemoteCardImages(Array.from(remoteCleanupPaths));
+        await cleanupLocalCardImages(Array.from(localCleanupPaths));
+
         if (error instanceof BlurryImageError) {
           Alert.alert('Image too blurry, retake');
           return;
@@ -2648,8 +2661,18 @@ function ScannerApp({
           storagePath: pendingScanReview.storagePath
         });
 
-        await Promise.all(pendingScanReview.cachePaths.map((cachePath) => FileSystem.deleteAsync(cachePath, { idempotent: true })));
+        await cleanupLocalCardImages(pendingScanReview.cachePaths);
         setPendingScanReview(null);
+        setPendingFrontSide(null);
+        setCaptureMode(null);
+        if (afterSaveBehavior === 'scan-again') {
+          if (preferredScanMode === 'ask') {
+            setIsCaptureModePickerOpen(true);
+          } else {
+            setCaptureMode(preferredScanMode);
+            setIsCameraOpen(true);
+          }
+        }
       } catch (error) {
         console.warn('Reviewed scan save failed', error);
         Alert.alert('Save failed', 'Please check your connection and try again.');
@@ -2657,15 +2680,20 @@ function ScannerApp({
         setIsSavingParsedReview(false);
       }
     })();
-  }, [pendingScanReview, recordHistory]);
+  }, [afterSaveBehavior, pendingScanReview, preferredScanMode, recordHistory]);
 
   const retakePendingScanReview = useCallback(() => {
+    if (pendingScanReview) {
+      void cleanupRemoteCardImages(pendingScanReview.storagePaths);
+      void cleanupLocalCardImages(pendingScanReview.cachePaths);
+    }
+
     captureGenerationRef.current += 1;
     setPendingScanReview(null);
     setPendingFrontSide(null);
     setIsSavingParsedReview(false);
     setIsCameraOpen(true);
-  }, []);
+  }, [pendingScanReview]);
 
   const handlePickFromGallery = useCallback(() => {
     void (async () => {
@@ -2687,16 +2715,21 @@ function ScannerApp({
     setActiveTab('history');
   }, [activeIndex]);
 
-  const openCamera = useCallback(() => {
-    setIsCaptureModePickerOpen(true);
-  }, []);
-
   const startCaptureMode = useCallback((mode: CardCaptureMode) => {
     setCaptureMode(mode);
     setPendingFrontSide(null);
     setIsCaptureModePickerOpen(false);
     setIsCameraOpen(true);
   }, []);
+
+  const openCamera = useCallback(() => {
+    if (preferredScanMode === 'ask') {
+      setIsCaptureModePickerOpen(true);
+      return;
+    }
+
+    startCaptureMode(preferredScanMode);
+  }, [preferredScanMode, startCaptureMode]);
 
   const cancelCaptureMode = useCallback(() => {
     setCaptureMode(null);
@@ -2939,6 +2972,10 @@ function ScannerApp({
           inFlightCount={inFlightCount}
           isCapturing={isCapturing}
           onClose={() => {
+            if (pendingFrontSide) {
+              void cleanupRemoteCardImages([pendingFrontSide.storagePath]);
+              void cleanupLocalCardImages([pendingFrontSide.cachePath]);
+            }
             captureGenerationRef.current += 1;
             setPreviewUri(null);
             setPendingFrontSide(null);
@@ -2958,24 +2995,11 @@ function ScannerApp({
           >
             {renderScene({ route: { key: activeTab } })}
           </PageTransitionWrapper>
-          <FAB
-            accessibilityLabel="Open camera"
-            icon="camera"
-            mode="flat"
-            onPress={openCamera}
-            style={[
-              styles.cameraFab,
-              {
-                backgroundColor: theme.colors.onSurface,
-                bottom: insets.bottom + 78
-              }
-            ]}
-            testID="camera-fab"
-          />
           <MotionBottomNav
             activeKey={activeTab}
             bottomInset={insets.bottom}
             onChange={handleTabChange}
+            onOpenCamera={openCamera}
             routes={visibleRoutes}
           />
         </>
@@ -3030,6 +3054,21 @@ function ScannerApp({
   );
 }
 
+function AppProviders({ children }: { children: React.ReactNode }) {
+  return (
+    <SafeAreaProvider>
+      <MaterialThemeProvider>
+        <AppPreferencesProvider>
+          <BottomSheetModalProvider>
+            <StatusBar style="auto" />
+            {children}
+          </BottomSheetModalProvider>
+        </AppPreferencesProvider>
+      </MaterialThemeProvider>
+    </SafeAreaProvider>
+  );
+}
+
 export default function App() {
   const [session, setSession] = useState<Session | null | undefined>(undefined);
   const [isScannerStoreReady, setIsScannerStoreReady] = useState(false);
@@ -3071,6 +3110,8 @@ export default function App() {
       }
 
       const params = getOAuthCallbackParams(url);
+      const authFlowToken = params.get('auth_flow');
+      const authIntent = params.get('auth_intent');
       const errorDescription = params.get('error_description') ?? params.get('error');
       const code = params.get('code') ?? getOAuthCodeFromUrl(url);
       const accessToken = params.get('access_token');
@@ -3088,6 +3129,15 @@ export default function App() {
       }
 
       if (code) {
+        const isAuthorizedRedirect = await consumeAuthRedirectFlow(
+          authFlowToken,
+          authIntent === 'oauth' ? 'oauth' : 'email'
+        );
+        if (!isAuthorizedRedirect) {
+          console.warn('Ignored unexpected auth callback', { authIntent, url });
+          return;
+        }
+
         const { data, error } = await supabase.auth.exchangeCodeForSession(code);
         if (cancelled) {
           return;
@@ -3103,6 +3153,12 @@ export default function App() {
       }
 
       if (!accessToken || !refreshToken) {
+        return;
+      }
+
+      const isAuthorizedRecoveryRedirect = await consumeAuthRedirectFlow(authFlowToken, 'recovery');
+      if (!isAuthorizedRecoveryRedirect) {
+        console.warn('Ignored unexpected recovery callback', { url });
         return;
       }
 
@@ -3164,6 +3220,29 @@ export default function App() {
     };
   }, [session?.user.id]);
 
+  useEffect(() => {
+    if (!session?.user.id || !isScannerStoreReady) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const cloudHistory = await loadCloudPersonalHistory(session.user.id);
+        if (!cancelled) {
+          scannerQueueStore.getState().replaceHistory(cloudHistory);
+        }
+      } catch (error) {
+        console.warn('Personal history refresh failed', error);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isScannerStoreReady, session?.user.id]);
+
   const handleSignOut = useCallback(() => {
     void supabase.auth.signOut().catch((error) => {
       console.warn('Supabase sign out failed', error);
@@ -3173,19 +3252,14 @@ export default function App() {
   if (session === undefined || (session && (!isScannerStoreReady || !isInviteGateReady))) {
     return (
       <GestureHandlerRootView style={styles.appContainer}>
-        <SafeAreaProvider>
-          <MaterialThemeProvider>
-            <BottomSheetModalProvider>
-              <StatusBar style="auto" />
-              <View style={styles.loadingScreen}>
-                <ActivityIndicator size="large" />
-                <Text style={styles.loadingText} variant="titleMedium">
-                  Loading account
-                </Text>
-              </View>
-            </BottomSheetModalProvider>
-          </MaterialThemeProvider>
-        </SafeAreaProvider>
+        <AppProviders>
+          <View style={styles.loadingScreen}>
+            <ActivityIndicator size="large" />
+            <Text style={styles.loadingText} variant="titleMedium">
+              Loading account
+            </Text>
+          </View>
+        </AppProviders>
       </GestureHandlerRootView>
     );
   }
@@ -3193,14 +3267,9 @@ export default function App() {
   if (!session) {
     return (
       <GestureHandlerRootView style={styles.appContainer}>
-        <SafeAreaProvider>
-          <MaterialThemeProvider>
-            <BottomSheetModalProvider>
-              <StatusBar style="auto" />
-              <AuthScreen />
-            </BottomSheetModalProvider>
-          </MaterialThemeProvider>
-        </SafeAreaProvider>
+        <AppProviders>
+          <AuthScreen />
+        </AppProviders>
       </GestureHandlerRootView>
     );
   }
@@ -3208,67 +3277,57 @@ export default function App() {
   if (pendingInvite) {
     return (
       <GestureHandlerRootView style={styles.appContainer}>
-        <SafeAreaProvider>
-          <MaterialThemeProvider>
-            <BottomSheetModalProvider>
-              <StatusBar style="auto" />
-              <View style={styles.loadingScreen}>
-                <Surface style={styles.inviteGateCard}>
-                  <Text variant="headlineSmall">Team invite pending</Text>
-                  <Text style={styles.inviteGateBody} variant="bodyMedium">
-                    {`Respond to the invite for ${pendingInvite.teamName ?? 'this team'} before using the scanner.`}
-                  </Text>
-                  <Text style={styles.inviteGateBody} variant="bodySmall">
-                    {pendingInvite.invitedEmail}
-                  </Text>
-                  <View style={styles.inviteGateActions}>
-                    <Button
-                      disabled={isInviteDecisionSubmitting}
-                      mode="outlined"
-                      onPress={() => {
-                        void respondToInvite('decline').catch((error) => {
-                          console.warn('Team invite response failed', error);
-                          Alert.alert('Invite update failed', 'Please try again.');
-                        });
-                      }}
-                      testID="decline-team-invite-button"
-                    >
-                      Decline
-                    </Button>
-                    <Button
-                      disabled={isInviteDecisionSubmitting}
-                      loading={isInviteDecisionSubmitting}
-                      mode="contained"
-                      onPress={() => {
-                        void respondToInvite('accept').catch((error) => {
-                          console.warn('Team invite response failed', error);
-                          Alert.alert('Invite update failed', 'Please try again.');
-                        });
-                      }}
-                      testID="accept-team-invite-button"
-                    >
-                      Accept
-                    </Button>
-                  </View>
-                </Surface>
+        <AppProviders>
+          <View style={styles.loadingScreen}>
+            <Surface style={styles.inviteGateCard}>
+              <Text variant="headlineSmall">Team invite pending</Text>
+              <Text style={styles.inviteGateBody} variant="bodyMedium">
+                {`Respond to the invite for ${pendingInvite.teamName ?? 'this team'} before using the scanner.`}
+              </Text>
+              <Text style={styles.inviteGateBody} variant="bodySmall">
+                {pendingInvite.invitedEmail}
+              </Text>
+              <View style={styles.inviteGateActions}>
+                <Button
+                  disabled={isInviteDecisionSubmitting}
+                  mode="outlined"
+                  onPress={() => {
+                    void respondToInvite('decline').catch((error) => {
+                      console.warn('Team invite response failed', error);
+                      Alert.alert('Invite update failed', 'Please try again.');
+                    });
+                  }}
+                  testID="decline-team-invite-button"
+                >
+                  Decline
+                </Button>
+                <Button
+                  disabled={isInviteDecisionSubmitting}
+                  loading={isInviteDecisionSubmitting}
+                  mode="contained"
+                  onPress={() => {
+                    void respondToInvite('accept').catch((error) => {
+                      console.warn('Team invite response failed', error);
+                      Alert.alert('Invite update failed', 'Please try again.');
+                    });
+                  }}
+                  testID="accept-team-invite-button"
+                >
+                  Accept
+                </Button>
               </View>
-            </BottomSheetModalProvider>
-          </MaterialThemeProvider>
-        </SafeAreaProvider>
+            </Surface>
+          </View>
+        </AppProviders>
       </GestureHandlerRootView>
     );
   }
 
   return (
     <GestureHandlerRootView style={styles.appContainer}>
-      <SafeAreaProvider>
-        <MaterialThemeProvider>
-          <BottomSheetModalProvider>
-            <StatusBar style="auto" />
-            <ScannerApp onSignOut={handleSignOut} session={session} workspace={teamWorkspace} />
-          </BottomSheetModalProvider>
-        </MaterialThemeProvider>
-      </SafeAreaProvider>
+      <AppProviders>
+        <ScannerApp onSignOut={handleSignOut} session={session} workspace={teamWorkspace} />
+      </AppProviders>
     </GestureHandlerRootView>
   );
 }
@@ -3307,11 +3366,6 @@ const styles = StyleSheet.create({
   },
   cameraContainer: {
     flex: 1
-  },
-  cameraFab: {
-    alignSelf: 'center',
-    elevation: 8,
-    position: 'absolute'
   },
   cameraGuidance: {
     alignSelf: 'center',
@@ -3508,6 +3562,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between'
   },
+  settingsGroup: {
+    gap: 10
+  },
+  settingsOptionsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10
+  },
+  settingsSectionHeader: {
+    gap: 4
+  },
   selectedReviewBlockBanner: {
     alignItems: 'center',
     borderRadius: 18,
@@ -3701,6 +3766,15 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     padding: 14
   },
+  memberActions: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexShrink: 0,
+    gap: 8
+  },
+  memberListScroll: {
+    height: 320
+  },
   memberRowCopy: {
     flex: 1,
     gap: 2
@@ -3729,6 +3803,27 @@ const styles = StyleSheet.create({
     height: 44,
     justifyContent: 'center',
     width: 44
+  },
+  pageHeader: {
+    borderColor: 'rgba(127, 127, 127, 0.22)',
+    borderRadius: 18,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: 18
+  },
+  pageHeaderActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginTop: 18
+  },
+  pageHeaderCopy: {
+    flex: 1
+  },
+  pageHeaderTopRow: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    gap: 12,
+    justifyContent: 'space-between'
   },
   recentList: {
     gap: 10

@@ -40,6 +40,7 @@ export type ScannerQueueState = {
   markUploaded: (id: string, storagePath: string) => void;
   markFailed: (id: string, error: string) => void;
   recordHistory: (item: Omit<ScannerHistoryItem, 'savedAt'> & { savedAt?: number }) => void;
+  replaceHistory: (items: ScannerHistoryItem[]) => void;
   clearSystemNotice: () => void;
   retry: (id: string) => void;
   remove: (id: string) => void;
@@ -82,12 +83,12 @@ function createScannerQueueState(pipeline: ReturnType<typeof createScanPipeline>
         queue: [
           ...state.queue,
           {
-          id: item.id,
-          imagePath: item.imagePath,
-          ...(item.teamId !== undefined ? { teamId: item.teamId } : {}),
-          rawText: item.rawText,
-          retryCount: 0,
-          status: 'uploading'
+            id: item.id,
+            imagePath: item.imagePath,
+            ...(item.teamId !== undefined ? { teamId: item.teamId } : {}),
+            ...(item.rawText ? { rawText: item.rawText } : {}),
+            retryCount: 0,
+            status: 'uploading'
           }
         ]
       }));
@@ -132,6 +133,11 @@ function createScannerQueueState(pipeline: ReturnType<typeof createScanPipeline>
           },
           ...state.history.filter((existing) => existing.id !== item.id)
         ]
+      }));
+    },
+    replaceHistory: (items) => {
+      set(() => ({
+        history: items
       }));
     },
     markFailed: (id, error) => {
@@ -205,8 +211,8 @@ export function createScannerQueueStore(
       skipHydration: options.skipHydration ?? false,
       storage: createJSONStorage(() => namespacedAsyncStorage),
       partialize: (state) => ({
-        queue: state.queue,
-        history: state.history
+        queue: state.queue.map(({ rawText, ...item }) => item),
+        history: []
       })
     })
   );
