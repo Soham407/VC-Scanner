@@ -3,6 +3,7 @@ import { supabase } from './supabase';
 export type PendingTeamInvite = {
   teamId: string;
   teamName: string | null;
+  teamLeaderEmail: string | null;
   createdAt: string;
   id: string;
   invitedEmail: string;
@@ -34,7 +35,8 @@ type TeamInviteInsertRow = {
 
 type TeamInvitePendingRow = {
   team_id: string;
-  teams?: { name?: unknown } | Array<{ name?: unknown }> | null;
+  team_name: string | null;
+  team_leader_email: string | null;
   created_at: string;
   id: string;
   invited_email: string;
@@ -42,21 +44,6 @@ type TeamInvitePendingRow = {
 
 function normalizeInviteEmail(email: string): string {
   return email.trim().toLowerCase();
-}
-
-function readTeamName(
-  value: TeamInvitePendingRow['teams']
-): string | null {
-  if (Array.isArray(value)) {
-    const first = value[0];
-    return typeof first?.name === 'string' ? first.name : null;
-  }
-
-  if (value && typeof value === 'object' && typeof value.name === 'string') {
-    return value.name;
-  }
-
-  return null;
 }
 
 export async function createTeamInvite(params: {
@@ -111,21 +98,19 @@ export async function listPendingTeamInvitesForEmail(
     return [];
   }
 
-  const { data, error } = await supabase
-    .from('team_invites')
-    .select('id, team_id, invited_email, created_at, teams(name)')
-    .eq('invited_email_normalized', normalizedEmail)
-    .eq('status', 'pending')
-    .order('created_at', { ascending: true });
+  const { data, error } = await supabase.rpc('list_pending_team_invites_for_current_user');
 
   if (error) {
     throw new Error(error.message);
   }
 
-  const rows = (data ?? []) as TeamInvitePendingRow[];
+  const rows = ((data ?? []) as TeamInvitePendingRow[]).filter((row) => (
+    normalizeInviteEmail(row.invited_email) === normalizedEmail
+  ));
   return rows.map((row) => ({
     teamId: row.team_id,
-    teamName: readTeamName(row.teams),
+    teamName: row.team_name,
+    teamLeaderEmail: row.team_leader_email,
     createdAt: row.created_at,
     id: row.id,
     invitedEmail: row.invited_email

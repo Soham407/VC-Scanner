@@ -1,20 +1,18 @@
-import { BottomSheetModal, BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import * as NetInfo from '@react-native-community/netinfo';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import { launchImageLibraryAsync } from 'expo-image-picker';
 import { StatusBar } from 'expo-status-bar';
-import { type ComponentProps, useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Linking, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
-import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
+import { Component, type ComponentProps, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, AppState, BackHandler, Image, Linking, type AppStateStatus, type LayoutChangeEvent, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import Animated, {
   FadeIn,
   FadeInDown,
   FadeInUp,
   FadeOut,
   LinearTransition,
-  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
@@ -48,11 +46,12 @@ import { PermissionDeniedScreen } from './src/components/PermissionDeniedScreen'
 import { QueueSheet } from './src/components/QueueSheet';
 import { RecentScanCard } from './src/components/RecentScanCard';
 import { ScanHeroCard } from './src/components/ScanHeroCard';
+import { BottomSheetModal, BottomSheetModalProvider, type BottomSheetModalHandle } from './src/components/bottomSheet';
 import { TeamAssignmentBatchSheet } from './src/components/TeamAssignmentBatchSheet';
 import { TeamReassignSheet } from './src/components/TeamReassignSheet';
 import { StatusChip, type OcrStatus } from './src/components/StatusChip';
-import { prepareImage } from './src/lib/imagePrep';
-import { consumeAuthRedirectFlow } from './src/lib/authRedirect';
+import { prepareImage, type ImageCropRegion } from './src/lib/imagePrep';
+import { consumeAuthRedirectFlow, type AuthRedirectIntent } from './src/lib/authRedirect';
 import { parseCardPreview, saveParsedCard, type ParsedCard, type ParseStatus } from './src/lib/scanCard';
 import { supabase } from './src/lib/supabase';
 import { deleteCardImages, uploadCardImage } from './src/lib/upload';
@@ -64,14 +63,24 @@ import {
   scannerQueueStore,
   syncScannerQueueStoreNamespace,
   type ScannerHistoryItem,
+  type ScannerQueueItem,
   useScannerQueueStore
 } from './store/scanner';
 
-type AppTab = 'dashboard' | 'history' | 'team' | 'profile';
+type AppTab = 'dashboard' | 'history' | 'team' | 'queue' | 'profile';
 type HistoryFilter = 'all' | 'saved' | 'needs-review' | 'unassigned' | 'assigned' | 'done';
 type HistoryMode = 'leader-inbox' | 'worker-history';
 type CardCaptureMode = 'singleSided' | 'doubleSided';
 type CardSide = 'front' | 'back';
+type CameraFacing = 'back' | 'front';
+type CameraCaptureFrame = {
+  height: number;
+  viewportHeight: number;
+  viewportWidth: number;
+  width: number;
+  x: number;
+  y: number;
+};
 
 type PendingScanReview = {
   cachePath: string;
@@ -82,6 +91,7 @@ type PendingScanReview = {
   rawText: string;
   storagePath: string;
   storagePaths: string[];
+  uploadLeadIds: string[];
   teamId: string | null;
 };
 
@@ -90,6 +100,7 @@ type CapturedCardSide = {
   rawText: string;
   side: CardSide;
   storagePath: string;
+  uploadLeadId: string;
 };
 
 type ParsedCardField = keyof ParsedCard;
@@ -102,7 +113,39 @@ type ParsedReviewBlock = {
   text: string;
 };
 
+type RootErrorBoundaryState = {
+  error: Error | null;
+};
+
 const REVIEW_SAVE_TIMEOUT_MS = 20000;
+const CAPTURE_PROCESSING_TIMEOUT_MS = 12000;
+const CAPTURE_CLOUD_STEP_TIMEOUT_MS = 20000;
+const SCAN_PERF_TAG = '[SCAN-PERF]';
+const CAMERA_GUIDE_TOP_OFFSET = 96;
+const CAMERA_GUIDE_BOTTOM_OFFSET = 154;
+const CAMERA_CAPTURE_MARGIN = 32;
+
+function nowMs(): number {
+  return typeof globalThis.performance?.now === 'function'
+    ? globalThis.performance.now()
+    : Date.now();
+}
+
+function formatDurationMs(startedAt: number): string {
+  return `${Math.round(nowMs() - startedAt)}ms`;
+}
+
+function logScanPerf(event: string, startedAt: number, details?: Record<string, unknown>): void {
+  console.info(SCAN_PERF_TAG, event, {
+    duration: formatDurationMs(startedAt),
+    ...details
+  });
+}
+
+type CaptureProcessingState = {
+  message: string;
+  timedOut: boolean;
+};
 
 const parsedCardFields: Array<{
   key: ParsedCardField;
@@ -111,13 +154,34 @@ const parsedCardFields: Array<{
   multiline?: boolean;
 }> = [
   { key: 'fullName', label: 'Name' },
-  { key: 'jobTitle', label: 'Role' },
+  { key: 'jobTitle', label: 'Job Title' },
   { key: 'companyName', label: 'Company' },
   { key: 'productServices', label: 'Product/Services', multiline: true },
   { key: 'email', label: 'Email', keyboardType: 'email-address' },
   { key: 'phoneNumber', label: 'Phone', keyboardType: 'phone-pad' },
   { key: 'address', label: 'Address', multiline: true }
 ];
+
+function getReviewFieldIcon(field: ParsedCardField): ComponentProps<typeof MaterialCommunityIcons>['name'] {
+  switch (field) {
+    case 'fullName':
+      return 'account';
+    case 'jobTitle':
+      return 'briefcase';
+    case 'companyName':
+      return 'office-building';
+    case 'productServices':
+      return 'shape-outline';
+    case 'email':
+      return 'email-outline';
+    case 'phoneNumber':
+      return 'phone';
+    case 'address':
+      return 'map-marker-outline';
+    default:
+      return 'text-box-outline';
+  }
+}
 
 function getTeamInboxItemTitle(item: TeamInboxItem): string {
   return item.companyName ?? item.fullName ?? item.rawText.split('\n')[0] ?? 'Untitled scan';
@@ -126,6 +190,33 @@ function getTeamInboxItemTitle(item: TeamInboxItem): string {
 function getTeamInboxItemSubtitle(item: TeamInboxItem): string {
   return item.fullName ?? item.jobTitle ?? item.email ?? item.id;
 }
+
+function getQueueItemTitle(item: ScannerQueueItem): string {
+  const filename = item.imagePath.split('/').pop()?.split('?')[0] ?? item.id;
+  return filename.length > 0 ? filename : item.id;
+}
+
+function getQueueItemSubtitle(item: ScannerQueueItem): string {
+  if (item.status === 'failed' && item.error) {
+    return item.error;
+  }
+
+  if (item.status === 'uploading') {
+    return 'Uploading image';
+  }
+
+  if (item.status === 'parsing') {
+    return 'Parsing details';
+  }
+
+  return 'Waiting to save';
+}
+
+const queueStatusLabels: Record<ScannerQueueItem['status'], string> = {
+  failed: 'Needs retry',
+  parsing: 'Finishing',
+  uploading: 'Saving'
+};
 
 function getAssignmentLabel(item: TeamInboxItem): string {
   if (!item.assignmentState) {
@@ -249,6 +340,88 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string)
         reject(error);
       });
   });
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  if (typeof error === 'string' && error.trim().length > 0) {
+    return error;
+  }
+
+  if (typeof error === 'object' && error !== null) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === 'string' && message.trim().length > 0) {
+      return message;
+    }
+  }
+
+  return 'Unknown error';
+}
+
+function isRetryableCaptureError(error: unknown): boolean {
+  if (error instanceof TypeError) {
+    return true;
+  }
+
+  if (typeof error === 'object' && error !== null) {
+    const status = (error as { status?: unknown; statusCode?: unknown }).status
+      ?? (error as { status?: unknown; statusCode?: unknown }).statusCode;
+
+    if (typeof status === 'number' && Number.isFinite(status)) {
+      if (status >= 500) {
+        return true;
+      }
+
+      if (status >= 400) {
+        return false;
+      }
+    }
+  }
+
+  const normalizedMessage = getErrorMessage(error).toLowerCase();
+  return (
+    normalizedMessage.includes('network request failed')
+    || normalizedMessage.includes('failed to fetch')
+    || normalizedMessage.includes('failed to send a request')
+    || normalizedMessage.includes('timeout')
+    || normalizedMessage.includes('timed out')
+    || normalizedMessage.includes('connection')
+    || normalizedMessage.includes('offline')
+  );
+}
+
+class RootErrorBoundary extends Component<{ children: ReactNode }, RootErrorBoundaryState> {
+  state: RootErrorBoundaryState = {
+    error: null
+  };
+
+  static getDerivedStateFromError(error: Error): RootErrorBoundaryState {
+    return { error };
+  }
+
+  componentDidCatch(error: Error): void {
+    console.error('App render failed', error);
+  }
+
+  render(): ReactNode {
+    if (this.state.error) {
+      return (
+        <View style={[styles.appContainer, styles.errorScreen]}>
+          <ScrollView contentContainerStyle={styles.errorScreenContent}>
+            <Text variant="headlineSmall">App failed to render</Text>
+            <Text style={styles.errorMessage} variant="bodyMedium">
+              Something went wrong while loading the app. Please close and reopen it.
+            </Text>
+          </ScrollView>
+        </View>
+      );
+    }
+
+    return this.props.children;
+  }
 }
 
 function createParsedReviewBlocks(rawText: string, parsed: ParsedCard): ParsedReviewBlock[] {
@@ -449,6 +622,7 @@ const routes: Array<{
   { focusedIcon: 'view-dashboard', key: 'dashboard', title: 'Dashboard', unfocusedIcon: 'view-dashboard-outline' },
   { focusedIcon: 'clock', key: 'history', title: 'History', unfocusedIcon: 'clock-outline' },
   { focusedIcon: 'account-group', key: 'team', title: 'Team', unfocusedIcon: 'account-group-outline' },
+  { focusedIcon: 'tray-full', key: 'queue', title: 'Queue', unfocusedIcon: 'tray' },
   { focusedIcon: 'account-circle', key: 'profile', title: 'Profile', unfocusedIcon: 'account-circle-outline' }
 ];
 
@@ -505,6 +679,37 @@ function createUuid(): string {
     const value = char === 'x' ? random : (random & 0x3) | 0x8;
     return value.toString(16);
   });
+}
+
+function clampNumber(value: number, minimum: number, maximum: number): number {
+  return Math.min(Math.max(value, minimum), maximum);
+}
+
+function createCropRegionForFrame(
+  imageWidth: number | undefined,
+  imageHeight: number | undefined,
+  frame: CameraCaptureFrame | null
+): ImageCropRegion | null {
+  if (!imageWidth || !imageHeight || !frame || frame.viewportWidth <= 0 || frame.viewportHeight <= 0) {
+    return null;
+  }
+
+  const scale = Math.max(frame.viewportWidth / imageWidth, frame.viewportHeight / imageHeight);
+  const renderedWidth = imageWidth * scale;
+  const renderedHeight = imageHeight * scale;
+  const hiddenX = Math.max(0, (renderedWidth - frame.viewportWidth) / 2);
+  const hiddenY = Math.max(0, (renderedHeight - frame.viewportHeight) / 2);
+  const originX = clampNumber((frame.x + hiddenX) / scale, 0, imageWidth - 1);
+  const originY = clampNumber((frame.y + hiddenY) / scale, 0, imageHeight - 1);
+  const maxWidth = imageWidth - originX;
+  const maxHeight = imageHeight - originY;
+
+  return {
+    height: Math.max(1, Math.round(clampNumber(frame.height / scale, 1, maxHeight))),
+    originX: Math.round(originX),
+    originY: Math.round(originY),
+    width: Math.max(1, Math.round(clampNumber(frame.width / scale, 1, maxWidth)))
+  };
 }
 
 function getOAuthCodeFromUrl(url: string): string | null {
@@ -609,6 +814,129 @@ function DashboardScreen({
           </Card.Content>
         </Card>
       </Animated.View>
+    </ScreenShell>
+  );
+}
+
+function QueueScreen({
+  items,
+  onOpenCamera,
+  onRetry
+}: {
+  items: ScannerQueueItem[];
+  onOpenCamera: () => void;
+  onRetry: (id: string) => void;
+}) {
+  const theme = useAppTheme();
+  const failedCount = items.filter((item) => item.status === 'failed').length;
+  const activeCount = items.length - failedCount;
+
+  return (
+    <ScreenShell>
+      <Animated.View entering={FadeInUp.duration(motion.duration.medium2).easing(motion.easing.emphasized)}>
+        <PageHeader
+          actions={(
+            <Button icon="camera" mode="contained" onPress={onOpenCamera} testID="queue-open-camera-button">
+              Scan
+            </Button>
+          )}
+          kicker="Saving queue"
+          status={failedCount > 0 ? 'failed' : items.length > 0 ? 'saving' : 'idle'}
+          summary={items.length === 0
+            ? 'No scans are waiting to save.'
+            : `${activeCount} active · ${failedCount} need retry`}
+          title="Queue"
+        />
+      </Animated.View>
+
+      <Animated.View entering={FadeInDown.delay(120).duration(motion.duration.medium2).easing(motion.easing.emphasized)}>
+        <Surface elevation={1} style={[styles.historyToolbar, { backgroundColor: theme.colors.surfaceContainer }]}>
+          <View style={styles.queueStatsRow}>
+            <View style={[styles.queueStatPill, { backgroundColor: theme.colors.surfaceContainerHighest }]}>
+              <Text style={{ color: theme.colors.onSurface }} variant="headlineSmall">
+                {items.length}
+              </Text>
+              <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelMedium">
+                Waiting
+              </Text>
+            </View>
+            <View style={[styles.queueStatPill, { backgroundColor: theme.colors.surfaceContainerHighest }]}>
+              <Text style={{ color: theme.colors.onSurface }} variant="headlineSmall">
+                {activeCount}
+              </Text>
+              <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelMedium">
+                Active
+              </Text>
+            </View>
+            <View style={[styles.queueStatPill, { backgroundColor: theme.colors.surfaceContainerHighest }]}>
+              <Text style={{ color: theme.colors.error }} variant="headlineSmall">
+                {failedCount}
+              </Text>
+              <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelMedium">
+                Retry
+              </Text>
+            </View>
+          </View>
+        </Surface>
+      </Animated.View>
+
+      {items.length === 0 ? (
+        <Card mode="outlined" style={styles.emptyCard}>
+          <Card.Content style={styles.emptyContent}>
+            <View style={[styles.emptyIcon, { backgroundColor: theme.colors.primaryContainer }]}>
+              <List.Icon color={theme.colors.onPrimaryContainer} icon="tray-full" />
+            </View>
+            <Text variant="titleMedium">Queue is clear</Text>
+            <Text style={{ color: theme.colors.onSurfaceVariant, textAlign: 'center' }} variant="bodyMedium">
+              Captures will show here while they upload, parse, or wait for a retry.
+            </Text>
+            <Button icon="camera" mode="contained" onPress={onOpenCamera}>
+              Scan card
+            </Button>
+          </Card.Content>
+        </Card>
+      ) : (
+        <View style={styles.historyList}>
+          {items.map((item, index) => (
+            <Animated.View
+              key={item.id}
+              entering={FadeInDown.delay(Math.min(index * 45, 240)).duration(motion.duration.medium1).easing(motion.easing.emphasized)}
+            >
+              <Animated.View layout={LinearTransition.springify().damping(24).stiffness(300)}>
+                <Surface elevation={1} style={[styles.queueRow, { backgroundColor: theme.colors.surfaceContainer }]}>
+                  <Image source={{ uri: item.imagePath }} style={styles.queueThumb} />
+                  <View style={styles.queueRowCopy}>
+                    <Text numberOfLines={1} variant="titleMedium">
+                      {getQueueItemTitle(item)}
+                    </Text>
+                    <Text numberOfLines={2} style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
+                      {getQueueItemSubtitle(item)}
+                    </Text>
+                    <View style={styles.historyMetaRow}>
+                      <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelSmall">
+                        {queueStatusLabels[item.status]}
+                      </Text>
+                      {item.teamId ? (
+                        <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelSmall">
+                          Team save
+                        </Text>
+                      ) : null}
+                    </View>
+                    {item.status === 'failed' ? (
+                      <View style={styles.assignmentActions}>
+                        <Button compact mode="contained" onPress={() => onRetry(item.id)} testID={`queue-retry-${item.id}`}>
+                          Retry
+                        </Button>
+                      </View>
+                    ) : null}
+                  </View>
+                  <StatusChip status={item.status === 'failed' ? 'failed' : 'saving'} />
+                </Surface>
+              </Animated.View>
+            </Animated.View>
+          ))}
+        </View>
+      )}
     </ScreenShell>
   );
 }
@@ -815,73 +1143,74 @@ function HistoryScreen({
             <Animated.View
               key={item.id}
               entering={FadeInDown.delay(Math.min(index * 45, 240)).duration(motion.duration.medium1).easing(motion.easing.emphasized)}
-              layout={LinearTransition.springify().damping(24).stiffness(300)}
             >
-              <Pressable accessibilityRole="button" onPress={() => onOpenItem(item)} testID={`open-history-item-${item.id}`}>
-                <Surface elevation={1} style={[styles.historyRow, { backgroundColor: theme.colors.surfaceContainer }]}>
-                  <View style={[styles.historyAvatar, { backgroundColor: theme.colors.surfaceContainerHighest }]}>
-                    <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelLarge">
-                      {getTeamInboxItemTitle(item).slice(0, 2).toUpperCase()}
-                    </Text>
-                  </View>
-                  <View style={styles.historyRowCopy}>
-                    <Text numberOfLines={1} variant="titleMedium">
-                      {getTeamInboxItemTitle(item)}
-                    </Text>
-                    <Text numberOfLines={1} style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
-                      {getTeamInboxItemSubtitle(item)}
-                    </Text>
-                    <View style={styles.historyMetaRow}>
-                      <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelSmall">
-                        {isPersonalHistory ? 'Saved scan' : getAssignmentLabel(item)}
+              <Animated.View layout={LinearTransition.springify().damping(24).stiffness(300)}>
+                <Pressable accessibilityRole="button" onPress={() => onOpenItem(item)} testID={`open-history-item-${item.id}`}>
+                  <Surface elevation={1} style={[styles.historyRow, { backgroundColor: theme.colors.surfaceContainer }]}>
+                    <View style={[styles.historyAvatar, { backgroundColor: theme.colors.surfaceContainerHighest }]}>
+                      <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelLarge">
+                        {getTeamInboxItemTitle(item).slice(0, 2).toUpperCase()}
                       </Text>
-                      {!isPersonalHistory ? (
+                    </View>
+                    <View style={styles.historyRowCopy}>
+                      <Text numberOfLines={1} variant="titleMedium">
+                        {getTeamInboxItemTitle(item)}
+                      </Text>
+                      <Text numberOfLines={1} style={{ color: theme.colors.onSurfaceVariant }} variant="bodyMedium">
+                        {getTeamInboxItemSubtitle(item)}
+                      </Text>
+                      <View style={styles.historyMetaRow}>
                         <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelSmall">
-                          {mode === 'worker-history'
-                            ? 'Assigned to you'
-                            : item.assignmentState && item.assignedToUserId
-                            ? `Assigned to ${getMemberLabel(memberLabelById.get(item.assignedToUserId))}`
-                            : 'Waiting for assignment'}
+                          {isPersonalHistory ? 'Saved scan' : getAssignmentLabel(item)}
                         </Text>
+                        {!isPersonalHistory ? (
+                          <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelSmall">
+                            {mode === 'worker-history'
+                              ? 'Assigned to you'
+                              : item.assignmentState && item.assignedToUserId
+                              ? `Assigned to ${getMemberLabel(memberLabelById.get(item.assignedToUserId))}`
+                              : 'Waiting for assignment'}
+                          </Text>
+                        ) : null}
+                      </View>
+                      {mode === 'leader-inbox' && item.assignmentState ? (
+                        <View style={styles.assignmentActions}>
+                          <Button compact mode="outlined" onPress={() => onOpenReassignAssignment(item)}>
+                            Reassign
+                          </Button>
+                        </View>
+                      ) : null}
+                      {!isPersonalHistory && mode === 'worker-history' && item.assignmentState ? (
+                        <View style={styles.assignmentActions}>
+                          <Button
+                            compact
+                            mode={item.assignmentState === 'done' ? 'contained' : 'outlined'}
+                            onPress={() => {
+                              void onUpdateAssignmentState(item.id, 'done').catch((error: unknown) => {
+                                console.warn('Assignment update failed', error);
+                              });
+                            }}
+                          >
+                            Done
+                          </Button>
+                          <Button
+                            compact
+                            mode={item.assignmentState === 'needs_review' ? 'contained' : 'outlined'}
+                            onPress={() => {
+                              void onUpdateAssignmentState(item.id, 'needs_review').catch((error: unknown) => {
+                                console.warn('Assignment update failed', error);
+                              });
+                            }}
+                          >
+                            Review
+                          </Button>
+                        </View>
                       ) : null}
                     </View>
-                    {mode === 'leader-inbox' && item.assignmentState ? (
-                      <View style={styles.assignmentActions}>
-                        <Button compact mode="outlined" onPress={() => onOpenReassignAssignment(item)}>
-                          Reassign
-                        </Button>
-                      </View>
-                    ) : null}
-                    {!isPersonalHistory && mode === 'worker-history' && item.assignmentState ? (
-                      <View style={styles.assignmentActions}>
-                        <Button
-                          compact
-                          mode={item.assignmentState === 'done' ? 'contained' : 'outlined'}
-                          onPress={() => {
-                            void onUpdateAssignmentState(item.id, 'done').catch((error: unknown) => {
-                              console.warn('Assignment update failed', error);
-                            });
-                          }}
-                        >
-                          Done
-                        </Button>
-                        <Button
-                          compact
-                          mode={item.assignmentState === 'needs_review' ? 'contained' : 'outlined'}
-                          onPress={() => {
-                            void onUpdateAssignmentState(item.id, 'needs_review').catch((error: unknown) => {
-                              console.warn('Assignment update failed', error);
-                            });
-                          }}
-                        >
-                          Review
-                        </Button>
-                      </View>
-                    ) : null}
-                  </View>
-                  <StatusChip status={item.parseStatus === 'parsed' ? 'parsed' : 'idle'} />
-                </Surface>
-              </Pressable>
+                    <StatusChip status={item.parseStatus === 'parsed' ? 'parsed' : 'idle'} />
+                  </Surface>
+                </Pressable>
+              </Animated.View>
             </Animated.View>
           ))}
         </View>
@@ -1336,19 +1665,23 @@ function ParsedCardReviewScreen({
   activeTeamName,
   isSaving,
   review,
+  onAddBackSide,
   onRetake,
   onSave
 }: {
   activeTeamName: string | null;
   isSaving: boolean;
   review: PendingScanReview;
+  onAddBackSide: (() => void) | null;
   onRetake: () => void;
   onSave: (parsed: ParsedCard) => void;
 }) {
   const theme = useAppTheme();
+  const insets = useSafeAreaInsets();
   const [fieldValues, setFieldValues] = useState<Record<ParsedCardField, string>>(() => parsedCardToEditableValues(review.parsed));
   const [blocks, setBlocks] = useState<ParsedReviewBlock[]>(() => createParsedReviewBlocks(review.rawText, review.parsed));
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
+  const [isExtraTextVisible, setIsExtraTextVisible] = useState(false);
 
   const moveBlock = useCallback((blockId: string, targetField: ParsedReviewTarget) => {
     setBlocks((currentBlocks) => {
@@ -1394,113 +1727,187 @@ function ParsedCardReviewScreen({
   const extraBlockCount = blocks.length - assignedBlockCount;
 
   return (
-    <ScreenShell>
-      <PageHeader
-        kicker={activeTeamName ?? 'Personal workspace'}
-        status={isSaving ? 'saving' : 'parsed'}
-        summary={`${assignedBlockCount} placed · ${extraBlockCount} extra text blocks`}
-        title="Review parsed fields"
-      />
+    <SafeAreaView edges={['top', 'bottom']} style={[styles.reviewScreen, { backgroundColor: theme.colors.background }]}>
+      <View style={styles.reviewTopBar}>
+        <Pressable accessibilityRole="button" hitSlop={10} onPress={onRetake} style={styles.reviewBackButton}>
+          <MaterialCommunityIcons color={theme.colors.secondary} name="arrow-left" size={34} />
+        </Pressable>
+        <View style={styles.reviewHeaderCopy}>
+          <Text style={{ color: theme.colors.secondary }} variant="headlineSmall">Profile Creator</Text>
+          <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
+            Review parsed fields
+          </Text>
+        </View>
+        <View style={styles.reviewHeaderMeta}>
+          <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelSmall">
+            {isSaving ? 'Saving' : review.cachePaths.length > 1 ? '2 sides' : '1 side'}
+          </Text>
+        </View>
+      </View>
 
-      {selectedBlock ? (
-        <Surface
-          elevation={1}
-          style={[
-            styles.selectedReviewBlockBanner,
-            {
-              backgroundColor: theme.colors.primaryContainer,
-              borderColor: theme.colors.primary
-            }
-          ]}
-        >
-          <MaterialCommunityIcons color={theme.colors.onPrimaryContainer} name="cursor-move" size={20} />
-          <View style={styles.selectedReviewBlockCopy}>
-            <Text style={{ color: theme.colors.onPrimaryContainer }} variant="labelLarge">
-              Moving text block
-            </Text>
-            <Text numberOfLines={2} style={{ color: theme.colors.onPrimaryContainer }} variant="bodySmall">
-              {selectedBlock.text}
-            </Text>
-          </View>
-          <Button compact mode="text" onPress={() => setSelectedBlockId(null)}>
-            Cancel
-          </Button>
-        </Surface>
-      ) : null}
-
-      <Surface elevation={1} style={[styles.parsedReviewPanel, { backgroundColor: theme.colors.surfaceContainer }]}>
-        <View style={styles.parsedReviewSectionHeader}>
-          <View>
-            <Text variant="titleMedium">Contact fields</Text>
+      <ScrollView
+        contentContainerStyle={[
+          styles.reviewContent,
+          { paddingBottom: Math.max(insets.bottom + 120, 140) }
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.reviewHeroRow}>
+          <Surface elevation={2} style={[styles.reviewPreviewCard, { backgroundColor: theme.colors.surface }]}>
+            <Animated.Image resizeMode="cover" source={{ uri: review.cachePath }} style={styles.reviewPreviewImage} />
+          </Surface>
+          <View style={styles.reviewPreviewActions}>
+            <Pressable
+              onPress={onRetake}
+              style={({ pressed }) => [
+                styles.reviewPreviewAction,
+                { backgroundColor: theme.colors.surface, opacity: pressed ? 0.82 : 1 }
+              ]}
+            >
+              <MaterialCommunityIcons color="#D6A800" name="camera-retake-outline" size={28} />
+              <Text style={{ color: theme.colors.secondary }} variant="titleMedium">Rescan</Text>
+            </Pressable>
+            {onAddBackSide ? (
+              <Pressable
+                onPress={onAddBackSide}
+                style={({ pressed }) => [
+                  styles.reviewPreviewAction,
+                  { backgroundColor: theme.colors.surface, opacity: pressed ? 0.82 : 1 }
+                ]}
+              >
+                <MaterialCommunityIcons color="#D6A800" name="plus" size={32} />
+                <Text style={{ color: theme.colors.secondary, textAlign: 'center' }} variant="titleMedium">
+                  Add Back Side
+                </Text>
+              </Pressable>
+            ) : (
+              <Pressable
+                onPress={() => setIsExtraTextVisible((current) => !current)}
+                style={({ pressed }) => [
+                  styles.reviewPreviewAction,
+                  { backgroundColor: theme.colors.surface, opacity: pressed ? 0.82 : 1 }
+                ]}
+              >
+                <MaterialCommunityIcons color="#D6A800" name="plus" size={34} />
+                <Text style={{ color: theme.colors.secondary, textAlign: 'center' }} variant="titleMedium">
+                  Add More
+                </Text>
+              </Pressable>
+            )}
           </View>
         </View>
-        {parsedCardFields.map((field) => (
-          <ParsedReviewField
-            blocks={blocks.filter((block) => block.assignedField === field.key)}
-            field={field}
-            key={field.key}
-            moveBlock={moveBlock}
-            onChangeText={(value) => updateFieldValue(field.key, value)}
-            selectedBlockId={selectedBlockId}
-            setSelectedBlockId={setSelectedBlockId}
-            value={fieldValues[field.key]}
-          />
-        ))}
-      </Surface>
 
-      <Surface elevation={1} style={[styles.parsedReviewPanel, { backgroundColor: theme.colors.surfaceContainer }]}>
-        <View style={styles.parsedReviewFieldHeader}>
-          <View style={styles.parsedReviewFieldTitleRow}>
-            <MaterialCommunityIcons color={theme.colors.onSurfaceVariant} name="tray-arrow-down" size={18} />
-            <Text variant="titleSmall">Extra OCR text</Text>
-            <View style={[styles.reviewBlockCountBadge, { backgroundColor: theme.colors.surfaceContainerHighest }]}>
-              <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelSmall">
-                {extraBlockCount}
+          {selectedBlock ? (
+          <Surface
+            elevation={1}
+            style={[
+              styles.selectedReviewBlockBanner,
+              {
+                backgroundColor: theme.colors.primaryContainer,
+                borderColor: theme.colors.primary
+              }
+            ]}
+          >
+            <MaterialCommunityIcons color={theme.colors.onPrimaryContainer} name="cursor-move" size={20} />
+            <View style={styles.selectedReviewBlockCopy}>
+              <Text style={{ color: theme.colors.onPrimaryContainer }} variant="labelLarge">
+                Selected OCR text
+              </Text>
+              <Text numberOfLines={2} style={{ color: theme.colors.onPrimaryContainer }} variant="bodySmall">
+                {selectedBlock.text}
               </Text>
             </View>
-          </View>
-          {selectedBlock && selectedBlock.assignedField !== 'extraText' ? (
-            <Button compact mode="text" onPress={() => moveBlock(selectedBlock.id, 'extraText')}>
-              Drop here
+            <Button compact mode="text" onPress={() => setSelectedBlockId(null)}>
+              Cancel
             </Button>
-          ) : null}
-        </View>
-        <View style={styles.reviewBlockList}>
-          {blocks.filter((block) => block.assignedField === 'extraText').map((block) => (
-            <ParsedReviewBlockChip
-              block={block}
-              key={block.id}
+          </Surface>
+        ) : null}
+
+        <View style={styles.reviewFieldList}>
+          {parsedCardFields.map((field) => (
+            <ParsedReviewField
+              blocks={blocks.filter((block) => block.assignedField === field.key)}
+              field={field}
+              key={field.key}
               moveBlock={moveBlock}
-              selected={selectedBlockId === block.id}
+              onChangeText={(value) => updateFieldValue(field.key, value)}
+              selectedBlockId={selectedBlockId}
               setSelectedBlockId={setSelectedBlockId}
+              value={fieldValues[field.key]}
             />
           ))}
         </View>
-        {blocks.every((block) => block.assignedField !== 'extraText') ? (
-          <View style={[styles.emptyReviewDropZone, { borderColor: theme.colors.outlineVariant }]}>
-            <MaterialCommunityIcons color={theme.colors.onSurfaceVariant} name="check-circle-outline" size={18} />
-            <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
-              No unassigned OCR text.
-            </Text>
-          </View>
-        ) : null}
-      </Surface>
 
-      <View style={styles.detailActions}>
+        {isExtraTextVisible ? (
+          <Surface elevation={1} style={[styles.parsedReviewPanel, { backgroundColor: theme.colors.surface }]}>
+            <View style={styles.parsedReviewFieldHeader}>
+              <View style={styles.parsedReviewFieldTitleRow}>
+                <MaterialCommunityIcons color={theme.colors.onSurfaceVariant} name="tray-arrow-down" size={18} />
+                <Text variant="titleSmall">Extra OCR text</Text>
+                <View style={[styles.reviewBlockCountBadge, { backgroundColor: theme.colors.surfaceContainerHigh }]}>
+                  <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelSmall">
+                    {extraBlockCount}
+                  </Text>
+                </View>
+              </View>
+              {selectedBlock && selectedBlock.assignedField !== 'extraText' ? (
+                <Button compact mode="text" onPress={() => moveBlock(selectedBlock.id, 'extraText')}>
+                  Drop here
+                </Button>
+              ) : null}
+            </View>
+            <View style={styles.reviewBlockList}>
+              {blocks.filter((block) => block.assignedField === 'extraText').map((block) => (
+                <ParsedReviewBlockChip
+                  block={block}
+                  key={block.id}
+                  moveBlock={moveBlock}
+                  selected={selectedBlockId === block.id}
+                  setSelectedBlockId={setSelectedBlockId}
+                />
+              ))}
+            </View>
+            {blocks.every((block) => block.assignedField !== 'extraText') ? (
+              <View style={[styles.emptyReviewDropZone, { borderColor: theme.colors.outlineVariant }]}>
+                <MaterialCommunityIcons color={theme.colors.onSurfaceVariant} name="check-circle-outline" size={18} />
+                <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
+                  No unassigned OCR text.
+                </Text>
+              </View>
+            ) : null}
+          </Surface>
+        ) : null}
+      </ScrollView>
+
+      <View
+        style={[
+          styles.reviewFooter,
+          {
+            backgroundColor: theme.colors.background,
+            paddingBottom: Math.max(insets.bottom, 12)
+          }
+        ]}
+      >
+        <Button
+          mode="outlined"
+          onPress={() => setIsExtraTextVisible((current) => !current)}
+          style={[styles.reviewFooterSecondaryButton, { backgroundColor: theme.colors.surfaceContainerHigh }]}
+          testID="toggle-extra-fields-button"
+        >
+          ADD MORE FIELDS
+        </Button>
         <Button
           disabled={isSaving}
           loading={isSaving}
           mode="contained"
           onPress={() => onSave(editableValuesToParsedCard(fieldValues))}
+          style={styles.reviewFooterPrimaryButton}
           testID="save-parsed-review-button"
         >
-          Save to team inbox
-        </Button>
-        <Button disabled={isSaving} mode="outlined" onPress={onRetake}>
-          Retake
+          SAVE
         </Button>
       </View>
-    </ScreenShell>
+    </SafeAreaView>
   );
 }
 
@@ -1523,54 +1930,79 @@ function ParsedReviewField({
 }) {
   const selectedBlock = selectedBlockId ? blocks.find((block) => block.id === selectedBlockId) : null;
   const theme = useAppTheme();
-
+  const hasValue = value.trim().length > 0;
   return (
-    <View style={[styles.parsedReviewField, { backgroundColor: theme.colors.surfaceContainerHighest }]}>
+    <Surface elevation={1} style={[styles.profileFieldCard, { backgroundColor: theme.colors.surface }]}>
       <View style={styles.parsedReviewFieldHeader}>
-        <View style={styles.parsedReviewFieldTitleRow}>
-          <Text variant="titleSmall">{field.label}</Text>
-          <View style={[styles.reviewBlockCountBadge, { backgroundColor: theme.colors.surfaceContainer }]}>
-            <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelSmall">
-              {blocks.length}
+        <View style={styles.profileFieldContent}>
+          <View style={[styles.profileFieldIconWrap, { backgroundColor: theme.colors.surfaceContainerHigh }]}>
+            <MaterialCommunityIcons color={theme.colors.secondary} name={getReviewFieldIcon(field.key)} size={24} />
+          </View>
+          <View style={styles.profileFieldCopy}>
+            <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
+              {field.label}
             </Text>
+            <TextInput
+              autoCapitalize={field.key === 'email' ? 'none' : undefined}
+              keyboardType={field.keyboardType}
+              mode="flat"
+              multiline={field.multiline}
+              onChangeText={onChangeText}
+              outlineStyle={styles.profileFieldInputWrap}
+              placeholder={field.label}
+              style={styles.profileFieldInput}
+              testID={`parsed-review-${field.key}-input`}
+              value={value}
+            />
           </View>
         </View>
-        {selectedBlockId && !selectedBlock ? (
-          <Button compact icon="tray-arrow-down" mode="contained-tonal" onPress={() => moveBlock(selectedBlockId, field.key)} testID={`drop-${field.key}-button`}>
-            Drop here
-          </Button>
-        ) : null}
+        <View style={styles.profileFieldActions}>
+          {selectedBlockId && !selectedBlock ? (
+            <Pressable
+              accessibilityRole="button"
+              hitSlop={8}
+              onPress={() => moveBlock(selectedBlockId, field.key)}
+              style={styles.profileFieldActionButton}
+              testID={`drop-${field.key}-button`}
+            >
+              <MaterialCommunityIcons color="#D6A800" name="tray-arrow-down" size={22} />
+            </Pressable>
+          ) : (
+            <View style={[styles.reviewBlockCountBadge, { backgroundColor: theme.colors.surfaceContainerHigh }]}>
+              <MaterialCommunityIcons color="#D6A800" name="layers-outline" size={16} />
+              <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelSmall">
+                {blocks.length}
+              </Text>
+            </View>
+          )}
+          {hasValue ? (
+            <Pressable accessibilityRole="button" hitSlop={8} onPress={() => onChangeText('')} style={styles.profileFieldActionButton}>
+              <MaterialCommunityIcons color={theme.colors.secondary} name="close" size={24} />
+            </Pressable>
+          ) : null}
+        </View>
       </View>
-      <TextInput
-        autoCapitalize={field.key === 'email' ? 'none' : undefined}
-        keyboardType={field.keyboardType}
-        label={field.label}
-        mode="outlined"
-        multiline={field.multiline}
-        onChangeText={onChangeText}
-        testID={`parsed-review-${field.key}-input`}
-        value={value}
-      />
-      <View style={styles.reviewBlockList}>
-        {blocks.map((block) => (
-          <ParsedReviewBlockChip
-            block={block}
-            key={block.id}
-            moveBlock={moveBlock}
-            selected={selectedBlockId === block.id}
-            setSelectedBlockId={setSelectedBlockId}
-          />
-        ))}
-        {blocks.length === 0 ? (
+      {blocks.length > 0 ? (
+        <View style={styles.reviewBlockList}>
+          {blocks.map((block) => (
+            <ParsedReviewBlockChip
+              block={block}
+              key={block.id}
+              moveBlock={moveBlock}
+              selected={selectedBlockId === block.id}
+              setSelectedBlockId={setSelectedBlockId}
+            />
+          ))}
+        </View>
+      ) : selectedBlockId ? (
           <View style={[styles.emptyReviewDropZone, { borderColor: theme.colors.outlineVariant }]}>
             <MaterialCommunityIcons color={theme.colors.onSurfaceVariant} name="gesture-tap" size={18} />
             <Text style={{ color: theme.colors.onSurfaceVariant }} variant="bodySmall">
-              Select a text block to drop it here.
+              Tap the selected OCR text to assign it here.
             </Text>
           </View>
-        ) : null}
-      </View>
-    </View>
+      ) : null}
+    </Surface>
   );
 }
 
@@ -1586,91 +2018,67 @@ function ParsedReviewBlockChip({
   setSelectedBlockId: (blockId: string | null) => void;
 }) {
   const theme = useAppTheme();
-  const dragX = useSharedValue(0);
-  const dragY = useSharedValue(0);
-  const dragStyle = useAnimatedStyle(() => ({
-    transform: [
-      { translateX: dragX.value },
-      { translateY: dragY.value }
-    ]
-  }));
-  const panGesture = Gesture.Pan()
-    .onBegin(() => {
-      runOnJS(setSelectedBlockId)(block.id);
-    })
-    .onUpdate((event) => {
-      dragX.value = event.translationX;
-      dragY.value = event.translationY;
-    })
-    .onFinalize(() => {
-      dragX.value = withSpring(0);
-      dragY.value = withSpring(0);
-    });
 
   return (
-    <GestureDetector gesture={panGesture}>
-      <Animated.View style={dragStyle}>
-        <Surface
-          elevation={selected ? 2 : 0}
-          style={[
-            styles.reviewBlockChip,
-            {
-              backgroundColor: selected ? theme.colors.primaryContainer : theme.colors.surfaceContainerHighest,
-              borderColor: selected ? theme.colors.primary : 'rgba(127, 127, 127, 0.22)'
-            }
-          ]}
-        >
-          <Pressable
-            onLongPress={() => setSelectedBlockId(selected ? null : block.id)}
-            onPress={() => setSelectedBlockId(selected ? null : block.id)}
-            style={styles.reviewBlockPressable}
-            testID={`review-block-${block.id}`}
+    <Surface
+      elevation={selected ? 2 : 0}
+      style={[
+        styles.reviewBlockChip,
+        {
+          backgroundColor: selected ? theme.colors.primaryContainer : theme.colors.surfaceContainerHighest,
+          borderColor: selected ? theme.colors.primary : 'rgba(127, 127, 127, 0.22)'
+        }
+      ]}
+    >
+      <Pressable
+        onLongPress={() => setSelectedBlockId(selected ? null : block.id)}
+        onPress={() => setSelectedBlockId(selected ? null : block.id)}
+        style={styles.reviewBlockPressable}
+        testID={`review-block-${block.id}`}
+      >
+        <View style={styles.reviewBlockTopRow}>
+          <View
+            style={[
+              styles.reviewBlockSourceBadge,
+              {
+                backgroundColor: selected ? theme.colors.surface : theme.colors.surfaceContainer,
+                borderColor: selected ? theme.colors.primary : theme.colors.outlineVariant
+              }
+            ]}
           >
-            <View style={styles.reviewBlockTopRow}>
-              <View
-                style={[
-                  styles.reviewBlockSourceBadge,
-                  {
-                    backgroundColor: selected ? theme.colors.surface : theme.colors.surfaceContainer,
-                    borderColor: selected ? theme.colors.primary : theme.colors.outlineVariant
-                  }
-                ]}
-              >
-                <Text style={{ color: selected ? theme.colors.primary : theme.colors.onSurfaceVariant }} variant="labelSmall">
-                  {block.source === 'ocr' ? 'OCR' : 'Parsed'}
-                </Text>
-              </View>
-              <MaterialCommunityIcons
-                color={selected ? theme.colors.primary : theme.colors.onSurfaceVariant}
-                name={selected ? 'cursor-move' : 'drag-horizontal-variant'}
-                size={18}
-              />
-            </View>
-            <Text style={{ color: selected ? theme.colors.onPrimaryContainer : theme.colors.onSurface }} variant="bodyMedium">
-              {block.text}
+            <Text style={{ color: selected ? theme.colors.primary : theme.colors.onSurfaceVariant }} variant="labelSmall">
+              {block.source === 'ocr' ? 'OCR' : 'Parsed'}
             </Text>
-            <Text style={{ color: selected ? theme.colors.onPrimaryContainer : theme.colors.onSurfaceVariant }} variant="labelSmall">
-              {selected ? 'Choose a destination below' : 'Tap to move this block'}
-            </Text>
-          </Pressable>
-          {selected ? (
-            <View style={styles.reviewBlockActions}>
-              {parsedCardFields.map((field) => (
-                <Button
-                  compact
-                  key={field.key}
-                  mode={block.assignedField === field.key ? 'contained-tonal' : 'text'}
-                  onPress={() => moveBlock(block.id, field.key)}
-                  testID={`move-${block.id}-to-${field.key}-button`}
-                >
-                  {field.label}
-                </Button>
-              ))}
-            </View>
-          ) : null}
-        </Surface>
-      </Animated.View>
-    </GestureDetector>
+          </View>
+          <MaterialCommunityIcons
+            color={selected ? theme.colors.primary : theme.colors.onSurfaceVariant}
+            name={selected ? 'check-circle-outline' : 'gesture-tap'}
+            size={18}
+          />
+        </View>
+        <Text numberOfLines={selected ? undefined : 2} style={{ color: selected ? theme.colors.onPrimaryContainer : theme.colors.onSurface }} variant="bodyMedium">
+          {block.text}
+        </Text>
+        <Text style={{ color: selected ? theme.colors.onPrimaryContainer : theme.colors.onSurfaceVariant }} variant="labelSmall">
+          {selected ? 'Choose a field below' : 'Tap to assign this text'}
+        </Text>
+      </Pressable>
+      {selected ? (
+        <View style={styles.reviewBlockActions}>
+          {parsedCardFields.map((field) => (
+            <Button
+              compact
+              key={field.key}
+              mode={block.assignedField === field.key ? 'contained-tonal' : 'text'}
+              onPress={() => moveBlock(block.id, field.key)}
+              testID={`move-${block.id}-to-${field.key}-button`}
+            >
+              {field.label}
+            </Button>
+          ))}
+        </View>
+      ) : null}
+    </Surface>
   );
 }
 
@@ -2123,35 +2531,54 @@ function ProfileScreen({
 
 function CameraScreen({
   allowGallery,
+  afterSaveBehavior,
+  captureMode,
   captureHint,
   captureTitle,
+  captureProcessing,
+  cameraFacing,
   handleCapture,
   handlePickFromGallery,
   handleTakePicture,
+  hasPendingFrontSide,
   inFlightCount,
   isCapturing,
   onClose,
   onOpenQueue,
+  onRotateCamera,
+  onToggleAfterSaveBehavior,
+  onToggleCaptureMode,
   permission,
   previewUri
 }: {
   allowGallery: boolean;
+  afterSaveBehavior: 'dashboard' | 'scan-again';
+  captureMode: CardCaptureMode | null;
   captureHint: string;
   captureTitle: string;
+  captureProcessing: CaptureProcessingState | null;
+  cameraFacing: CameraFacing;
   handleCapture: (uri: string) => void;
   handlePickFromGallery: () => void;
-  handleTakePicture: (camera: CameraView | null) => Promise<string | null>;
+  handleTakePicture: (camera: CameraView | null, captureFrame: CameraCaptureFrame | null) => Promise<string | null>;
+  hasPendingFrontSide: boolean;
   inFlightCount: number;
   isCapturing: boolean;
   onClose: () => void;
   onOpenQueue: () => void;
+  onRotateCamera: () => void;
+  onToggleAfterSaveBehavior: () => void;
+  onToggleCaptureMode: () => void;
   permission: { granted: boolean } | null;
   previewUri: string | null;
 }) {
   const cameraRef = useRef<CameraView | null>(null);
   const theme = useAppTheme();
-  const { height, width } = useWindowDimensions();
-  const isLandscape = width > height;
+  const [viewport, setViewport] = useState<{ height: number; width: number } | null>(null);
+  const [guideStageLayout, setGuideStageLayout] = useState<{ x: number; y: number } | null>(null);
+  const [guideFrameLayout, setGuideFrameLayout] = useState<{ height: number; width: number; x: number; y: number } | null>(null);
+  const viewportWidth = viewport?.width ?? 0;
+  const viewportHeight = viewport?.height ?? 0;
   const containerScale = useSharedValue(0.92);
   const containerOpacity = useSharedValue(0);
 
@@ -2165,22 +2592,66 @@ function CameraScreen({
     transform: [{ scale: containerScale.value }]
   }));
 
+  const captureFrame = viewport && guideStageLayout && guideFrameLayout
+    ? {
+        height: clampNumber(guideFrameLayout.height + CAMERA_CAPTURE_MARGIN * 2, 1, viewport.height),
+        viewportHeight: viewport.height,
+        viewportWidth: viewport.width,
+        width: clampNumber(guideFrameLayout.width + CAMERA_CAPTURE_MARGIN * 2, 1, viewport.width),
+        x: clampNumber(guideStageLayout.x + guideFrameLayout.x - CAMERA_CAPTURE_MARGIN, 0, viewport.width),
+        y: clampNumber(CAMERA_GUIDE_TOP_OFFSET + guideStageLayout.y + guideFrameLayout.y - CAMERA_CAPTURE_MARGIN, 0, viewport.height)
+      }
+    : null;
+  const visibleGuideFrame = viewport && guideStageLayout && guideFrameLayout
+    ? {
+        height: guideFrameLayout.height,
+        width: guideFrameLayout.width,
+        x: guideStageLayout.x + guideFrameLayout.x,
+        y: CAMERA_GUIDE_TOP_OFFSET + guideStageLayout.y + guideFrameLayout.y
+      }
+    : null;
+
   const takePicture = useCallback(async () => {
-    return handleTakePicture(cameraRef.current);
-  }, [handleTakePicture]);
+    return handleTakePicture(cameraRef.current, captureFrame);
+  }, [captureFrame, handleTakePicture]);
+  const frameWidth = viewportWidth > 0
+    ? Math.min(Math.max(viewportWidth - 112, 190), 280)
+    : 240;
+  const guideBottomOffset = CAMERA_GUIDE_BOTTOM_OFFSET;
+  const frameAspectRatio = 0.58;
+
+  const handleViewportLayout = useCallback((event: LayoutChangeEvent) => {
+    const nextWidth = Math.round(event.nativeEvent.layout.width);
+    const nextHeight = Math.round(event.nativeEvent.layout.height);
+
+    setViewport((current) => {
+      if (current?.width === nextWidth && current?.height === nextHeight) {
+        return current;
+      }
+
+      return {
+        height: nextHeight,
+        width: nextWidth
+      };
+    });
+  }, []);
 
   if (!permission) {
     return <View style={[styles.cameraContainer, { backgroundColor: theme.colors.surface }]} />;
   }
 
   if (!permission.granted) {
-    return <PermissionDeniedScreen />;
+    return <PermissionDeniedScreen onGoBack={onClose} />;
   }
+
+  const processingMessage = captureProcessing?.message ?? 'Hold steady while we take the photo.';
+  const processingTitle = captureProcessing ? 'Saving scan' : 'Capturing photo';
 
   return (
     <Animated.View
       entering={FadeIn.duration(motion.duration.medium1).easing(motion.easing.emphasized)}
       exiting={FadeOut.duration(motion.duration.short4).easing(motion.easing.standardExit)}
+      onLayout={handleViewportLayout}
       style={[styles.cameraContainer, { backgroundColor: theme.colors.scrim }, containerTransformStyle]}
     >
       {previewUri ? (
@@ -2192,47 +2663,214 @@ function CameraScreen({
         />
       ) : (
         <>
-          <CameraView facing="back" ref={cameraRef} style={StyleSheet.absoluteFill} testID="camera-viewfinder" />
-          <View style={styles.cameraGuidance} pointerEvents="none">
-            <Text style={{ color: theme.colors.surface }} variant="labelLarge">
-              {captureTitle}
-            </Text>
-            <Text style={{ color: theme.colors.surface }} variant="bodySmall">
-              {captureHint}
-            </Text>
-          </View>
+          <CameraView facing={cameraFacing} ref={cameraRef} style={StyleSheet.absoluteFill} testID="camera-viewfinder" />
+          {visibleGuideFrame && viewportHeight > 0 ? (
+            <View pointerEvents="none" style={styles.cameraBackdropTint}>
+              <View style={[styles.cameraDimTop, { backgroundColor: 'rgba(25, 28, 34, 0.8)', height: visibleGuideFrame.y }]} />
+              <View style={[styles.cameraDimMiddle, { height: visibleGuideFrame.height }]}>
+                <View style={[styles.cameraDimSide, { backgroundColor: 'rgba(25, 28, 34, 0.8)', width: visibleGuideFrame.x }]} />
+                <View style={{ height: visibleGuideFrame.height, width: visibleGuideFrame.width }} />
+                <View style={[styles.cameraDimSide, { backgroundColor: 'rgba(25, 28, 34, 0.8)', flex: 1 }]} />
+              </View>
+              <View style={[styles.cameraDimBottom, { backgroundColor: 'rgba(25, 28, 34, 0.8)' }]} />
+            </View>
+          ) : null}
           <Animated.View
             entering={FadeInDown.delay(80).duration(motion.duration.medium1).easing(motion.easing.emphasized)}
             style={styles.cameraTopBar}
           >
             <IconButton
               accessibilityLabel="Close camera"
-              containerColor={theme.colors.surfaceContainerHighest}
+              containerColor="rgba(10, 19, 44, 0.14)"
               icon="close"
+              iconColor={theme.colors.surface}
               mode="contained"
               onPress={onClose}
-              size={24}
+              size={26}
               testID="close-camera-button"
             />
-            <StatusChip status={isCapturing || previewUri ? 'scanning' : inFlightCount > 0 ? 'saving' : 'idle'} />
-            {__DEV__ && allowGallery ? (
-              <Button
-                compact
-                icon="image"
-                mode="contained-tonal"
-                onPress={handlePickFromGallery}
-                testID="pick-from-gallery-button"
-              >
-                Gallery
-              </Button>
-            ) : null}
+            <IconButton
+              accessibilityLabel="Camera guide"
+              containerColor="rgba(10, 19, 44, 0.14)"
+              icon="qrcode-scan"
+              iconColor={theme.colors.surface}
+              mode="contained"
+              onPress={onOpenQueue}
+              size={24}
+            />
           </Animated.View>
+          <View style={[styles.cameraGuidance, { bottom: guideBottomOffset }]} pointerEvents="none">
+            <View
+              onLayout={(event) => {
+                const { x, y } = event.nativeEvent.layout;
+                setGuideStageLayout((current) => {
+                  const next = { x: Math.round(x), y: Math.round(y) };
+                  return current?.x === next.x && current?.y === next.y ? current : next;
+                });
+              }}
+              style={styles.cameraGuideStage}
+            >
+              <View
+                onLayout={(event) => {
+                  const { height, width, x, y } = event.nativeEvent.layout;
+                  setGuideFrameLayout((current) => {
+                    const next = {
+                      height: Math.round(height),
+                      width: Math.round(width),
+                      x: Math.round(x),
+                      y: Math.round(y)
+                    };
+                    return current?.height === next.height && current?.width === next.width && current?.x === next.x && current?.y === next.y
+                      ? current
+                      : next;
+                  });
+                }}
+                style={[styles.cameraGuideFrame, { aspectRatio: frameAspectRatio, width: frameWidth }]}
+              >
+                <View
+                  style={[
+                    styles.cameraGuideFill,
+                    { backgroundColor: theme.dark ? 'rgba(255,255,255,0.06)' : 'rgba(255,255,255,0.12)' }
+                  ]}
+                />
+                <View style={styles.cameraGuideRow}>
+                  <View style={styles.cameraGuideCornerTopLeft} />
+                  <View style={styles.cameraGuideCornerTopRight} />
+                </View>
+                <View style={styles.cameraGuideRowBottom}>
+                  <View style={styles.cameraGuideCornerBottomLeft} />
+                  <View style={styles.cameraGuideCornerBottomRight} />
+                </View>
+              </View>
+            </View>
+            <View style={styles.cameraGuideCopy}>
+              <View
+                style={[
+                  styles.cameraModeBadge,
+                  { backgroundColor: 'rgba(255,255,255,0.18)' }
+                ]}
+              >
+                <MaterialCommunityIcons color={theme.colors.surface} name="card-account-details-outline" size={16} />
+                <Text style={{ color: theme.colors.surface }} variant="labelMedium">
+                  {hasPendingFrontSide ? 'Back side' : 'Front side'}
+                </Text>
+              </View>
+              <Text style={styles.cameraGuideTitle} variant="titleMedium">
+                {hasPendingFrontSide ? captureTitle : 'Fit the card in frame'}
+              </Text>
+              <Text style={styles.cameraGuideSubtitle} variant="bodySmall">
+                Keep the card vertical and place all four edges inside the corners.
+              </Text>
+            </View>
+          </View>
           <CaptureButton
-            disabled={isCapturing}
+            disabled={isCapturing || Boolean(captureProcessing)}
             onCapture={handleCapture}
-            placement={isLandscape ? 'right' : 'bottom'}
+            placement="bottom"
             takePicture={takePicture}
           />
+          {isCapturing || captureProcessing ? (
+            <View style={styles.captureProcessingOverlay} pointerEvents="none" testID="capture-processing-overlay">
+              <Surface elevation={2} style={[styles.captureProcessingCard, { backgroundColor: theme.colors.surfaceContainerHigh }]}>
+                <ActivityIndicator />
+                <Text style={styles.captureProcessingTitle} variant="titleMedium">
+                  {processingTitle}
+                </Text>
+                <Text style={{ color: theme.colors.onSurfaceVariant, textAlign: 'center' }} variant="bodyMedium">
+                  {processingMessage}
+                </Text>
+                {captureProcessing?.timedOut ? (
+                  <Text style={{ color: theme.colors.onSurfaceVariant, textAlign: 'center' }} variant="bodySmall">
+                    The scan will keep retrying in the background.
+                  </Text>
+                ) : null}
+              </Surface>
+            </View>
+          ) : null}
+          <View style={[styles.cameraBottomTray, { backgroundColor: theme.colors.surfaceContainerHigh }]}>
+            <View style={[styles.cameraTraySection, styles.cameraTraySectionLeft]}>
+              {__DEV__ && allowGallery ? (
+                <Pressable
+                  onPress={handlePickFromGallery}
+                  style={({ pressed }) => [
+                    styles.cameraTrayItem,
+                    pressed && styles.cameraTrayItemPressed
+                  ]}
+                  testID="pick-from-gallery-button"
+                >
+                  <MaterialCommunityIcons color={theme.colors.onSurfaceVariant} name="image-multiple-outline" size={24} />
+                  <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelMedium">
+                    Images
+                  </Text>
+                </Pressable>
+              ) : (
+                <View style={[styles.cameraTrayItem, styles.cameraTrayItemDisabled]}>
+                  <MaterialCommunityIcons color={theme.colors.onSurfaceVariant} name="image-multiple-outline" size={24} />
+                  <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelMedium">
+                    Images
+                  </Text>
+                </View>
+              )}
+              <Pressable
+                onPress={onRotateCamera}
+                style={({ pressed }) => [
+                  styles.cameraTrayItem,
+                  pressed && styles.cameraTrayItemPressed
+                ]}
+                testID="rotate-camera-button"
+              >
+                <MaterialCommunityIcons color={theme.colors.onSurfaceVariant} name="camera-flip-outline" size={24} />
+                <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelMedium">
+                  Rotate
+                </Text>
+              </Pressable>
+            </View>
+            <View style={styles.cameraTrayCaptureSpacer} />
+            <View style={[styles.cameraTraySection, styles.cameraTraySectionRight]}>
+              <Pressable
+                onPress={onToggleCaptureMode}
+                style={({ pressed }) => [
+                  styles.cameraTrayItem,
+                  styles.cameraTrayModeItem,
+                  { backgroundColor: captureMode === 'doubleSided' ? '#C6F500' : 'transparent' },
+                  pressed && styles.cameraTrayItemPressed
+                ]}
+                testID="toggle-capture-mode-button"
+              >
+                <MaterialCommunityIcons
+                  color={captureMode === 'doubleSided' ? '#0B0D0E' : theme.colors.onSurfaceVariant}
+                  name={captureMode === 'doubleSided' ? 'card-bulleted-outline' : 'card-account-details-outline'}
+                  size={24}
+                />
+                <Text style={{ color: captureMode === 'doubleSided' ? '#0B0D0E' : theme.colors.onSurfaceVariant }} variant="labelMedium">
+                  {captureMode === 'doubleSided' ? 'Both' : 'Single'}
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={onToggleAfterSaveBehavior}
+              style={({ pressed }) => [
+                styles.cameraTrayItem,
+                styles.cameraTrayModeItem,
+                styles.cameraTrayBatchItem,
+                { backgroundColor: afterSaveBehavior === 'scan-again' ? '#C6F500' : 'transparent' },
+                pressed && styles.cameraTrayItemPressed
+              ]}
+              testID="toggle-after-save-behavior-button"
+            >
+              <MaterialCommunityIcons
+                color={afterSaveBehavior === 'scan-again' ? '#0B0D0E' : theme.colors.onSurfaceVariant}
+                name={afterSaveBehavior === 'scan-again' ? 'layers-triple-outline' : 'checkbox-blank-circle-outline'}
+                size={24}
+              />
+              <Text
+                style={{ color: afterSaveBehavior === 'scan-again' ? '#0B0D0E' : theme.colors.onSurfaceVariant }}
+                variant="labelMedium"
+              >
+                {afterSaveBehavior === 'scan-again' ? 'Batch' : 'Single'}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
           <CornerPill count={inFlightCount} onPress={onOpenQueue} />
         </>
       )}
@@ -2292,8 +2930,8 @@ function ScannerApp({
   workspace: TeamWorkspaceState;
   session: Session;
 }) {
-  const { afterSaveBehavior, preferredScanMode } = useAppPreferences();
-  const [permission, requestPermission] = useCameraPermissions();
+  const { afterSaveBehavior, preferredScanMode, setAfterSaveBehavior } = useAppPreferences();
+  const [permission, requestPermission, getPermission] = useCameraPermissions();
   const [activeTab, setActiveTab] = useState<AppTab>('dashboard');
   const [previousTabIndex, setPreviousTabIndex] = useState(0);
   const [isCameraOpen, setIsCameraOpen] = useState(false);
@@ -2305,8 +2943,9 @@ function ScannerApp({
   const [isSavingParsedReview, setIsSavingParsedReview] = useState(false);
   const [pendingScanReview, setPendingScanReview] = useState<PendingScanReview | null>(null);
   const [captureMode, setCaptureMode] = useState<CardCaptureMode | null>(null);
-  const [isCaptureModePickerOpen, setIsCaptureModePickerOpen] = useState(false);
+  const [cameraFacing, setCameraFacing] = useState<CameraFacing>('back');
   const [pendingFrontSide, setPendingFrontSide] = useState<(CapturedCardSide & { leadId: string }) | null>(null);
+  const [captureProcessing, setCaptureProcessing] = useState<CaptureProcessingState | null>(null);
   const {
     addBatchItem,
     createTeam,
@@ -2341,9 +2980,11 @@ function ScannerApp({
   } = workspace;
   const captureLockRef = useRef(false);
   const captureGenerationRef = useRef(0);
-  const queueSheetRef = useRef<BottomSheetModal>(null);
-  const batchSheetRef = useRef<BottomSheetModal>(null);
-  const reassignSheetRef = useRef<BottomSheetModal>(null);
+  const captureProcessingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingCaptureCropRef = useRef<ImageCropRegion | null>(null);
+  const queueSheetRef = useRef<BottomSheetModalHandle>(null);
+  const batchSheetRef = useRef<BottomSheetModalHandle>(null);
+  const reassignSheetRef = useRef<BottomSheetModalHandle>(null);
   const isDrainingRef = useRef(false);
   const insets = useSafeAreaInsets();
   const theme = useAppTheme();
@@ -2372,7 +3013,11 @@ function ScannerApp({
       ? { ...route, ...historyRoute }
       : route
   );
-  const visibleRoutes = hasTeamWorkspace ? modeAwareRoutes : modeAwareRoutes.filter((route) => route.key !== 'team');
+  const visibleRoutes = modeAwareRoutes.filter((route) => (
+    hasTeamWorkspace
+      ? route.key !== 'queue'
+      : route.key !== 'team'
+  ));
   const activeIndex = visibleRoutes.findIndex((route) => route.key === activeTab);
   const pageDirection = activeIndex >= previousTabIndex ? 1 : -1;
   const dashboardStatus: OcrStatus = failedCount > 0
@@ -2388,19 +3033,123 @@ function ScannerApp({
       ? 'Flip the same card and capture the back side.'
       : 'Start with the front side that shows the name or company.'
     : 'Align the card clearly and capture one side.';
+  const clearCaptureProcessingTimeout = useCallback(() => {
+    if (captureProcessingTimeoutRef.current) {
+      clearTimeout(captureProcessingTimeoutRef.current);
+      captureProcessingTimeoutRef.current = null;
+    }
+  }, []);
+  const stopCaptureProcessing = useCallback(() => {
+    clearCaptureProcessingTimeout();
+    setCaptureProcessing(null);
+  }, [clearCaptureProcessingTimeout]);
+  const startCaptureProcessing = useCallback((message: string) => {
+    clearCaptureProcessingTimeout();
+    setCaptureProcessing({
+      message,
+      timedOut: false
+    });
+
+    captureProcessingTimeoutRef.current = setTimeout(() => {
+      setCaptureProcessing((current) => {
+        if (!current) {
+          return current;
+        }
+
+        return {
+          message: 'This is taking longer than usual. The scan will stay queued if the connection drops.',
+          timedOut: true
+        };
+      });
+    }, CAPTURE_PROCESSING_TIMEOUT_MS);
+  }, [clearCaptureProcessingTimeout]);
+  const queueCaptureFallback = useCallback((params: {
+    cachePath: string;
+    cachePaths?: string[];
+    leadId: string;
+    rawText: string;
+    storagePath?: string;
+    storagePaths?: string[];
+    uploadLeadIds?: string[];
+    teamId: string | null;
+  }) => {
+    scannerQueueStore.getState().enqueue({
+      id: params.leadId,
+      imagePath: params.cachePath,
+      ...(params.cachePaths?.length ? { imagePaths: params.cachePaths } : {}),
+      rawText: params.rawText,
+      ...(params.storagePath ? { storagePath: params.storagePath } : {}),
+      ...(params.storagePaths?.length ? { storagePaths: params.storagePaths } : {}),
+      ...(params.uploadLeadIds?.length ? { uploadLeadIds: params.uploadLeadIds } : {}),
+      teamId: params.teamId
+    });
+
+    if (params.storagePath) {
+      scannerQueueStore.getState().markUploaded(
+        params.leadId,
+        params.storagePaths?.length ? params.storagePaths : params.storagePath
+      );
+    }
+  }, []);
+  const closeCamera = useCallback(() => {
+    captureGenerationRef.current += 1;
+    stopCaptureProcessing();
+    setCameraFacing('back');
+    setPreviewUri(null);
+    if (pendingFrontSide) {
+      void cleanupRemoteCardImages([pendingFrontSide.storagePath]);
+      void cleanupLocalCardImages([pendingFrontSide.cachePath]);
+    }
+    setPendingFrontSide(null);
+    setCaptureMode(null);
+    setIsCameraOpen(false);
+  }, [pendingFrontSide, stopCaptureProcessing]);
+  const toggleCaptureMode = useCallback(() => {
+    if (pendingFrontSide) {
+      Alert.alert('Finish current scan first', 'Capture the back side or close the camera before switching modes.');
+      return;
+    }
+
+    setCaptureMode((current) => current === 'doubleSided' ? 'singleSided' : 'doubleSided');
+  }, [pendingFrontSide]);
+  const toggleAfterSaveBehavior = useCallback(() => {
+    setAfterSaveBehavior(afterSaveBehavior === 'scan-again' ? 'dashboard' : 'scan-again');
+  }, [afterSaveBehavior, setAfterSaveBehavior]);
   const visibleHistoryItems = isPersonalHistory
     ? history.map((item) => scannerHistoryToInboxItem(item, session.user.id))
     : historyItems;
 
   useEffect(() => {
-    if (!permission) {
+    if (isCameraOpen && !permission) {
       void requestPermission();
     }
-  }, [permission, requestPermission]);
+  }, [isCameraOpen, permission, requestPermission]);
+
+  useEffect(() => {
+    if (!isCameraOpen) {
+      return undefined;
+    }
+
+    const refreshCameraPermission = (nextState: AppStateStatus): void => {
+      if (nextState === 'active') {
+        void getPermission();
+      }
+    };
+
+    const subscription = AppState.addEventListener('change', refreshCameraPermission);
+    return () => {
+      subscription.remove();
+    };
+  }, [getPermission, isCameraOpen]);
 
   useEffect(() => {
     if (!hasTeamWorkspace && activeTab === 'team') {
       setActiveTab('profile');
+      return;
+    }
+
+    if (hasTeamWorkspace && activeTab === 'queue') {
+      setActiveTab('team');
     }
   }, [activeTab, hasTeamWorkspace]);
   useEffect(() => {
@@ -2484,21 +3233,35 @@ function ScannerApp({
     };
   }, [drainOnce, isConnected, queue]);
 
-  const handleTakePicture = useCallback(async (camera: CameraView | null): Promise<string | null> => {
+  useEffect(() => () => {
+    clearCaptureProcessingTimeout();
+  }, [clearCaptureProcessingTimeout]);
+
+  const handleTakePicture = useCallback(async (camera: CameraView | null, captureFrame: CameraCaptureFrame | null): Promise<string | null> => {
     if (captureLockRef.current) {
       return null;
     }
 
     captureLockRef.current = true;
     setIsCapturing(true);
+    const captureStartedAt = nowMs();
 
     try {
       const capturedPhoto = await camera?.takePictureAsync({
         quality: 0.7,
         skipProcessing: true
       });
+      pendingCaptureCropRef.current = createCropRegionForFrame(capturedPhoto?.width, capturedPhoto?.height, captureFrame);
+      logScanPerf('camera.takePictureAsync', captureStartedAt, {
+        hasCaptureFrame: Boolean(captureFrame),
+        height: capturedPhoto?.height ?? null,
+        width: capturedPhoto?.width ?? null
+      });
 
       return capturedPhoto?.uri ?? null;
+    } catch (error) {
+      logScanPerf('camera.takePictureAsync.failed', captureStartedAt);
+      throw error;
     } finally {
       captureLockRef.current = false;
       setIsCapturing(false);
@@ -2509,78 +3272,136 @@ function ScannerApp({
     const captureGeneration = captureGenerationRef.current + 1;
     captureGenerationRef.current = captureGeneration;
     setPreviewUri(uri);
+    startCaptureProcessing('Preparing scan');
+    const captureStartedAt = nowMs();
 
     void (async () => {
       const localCleanupPaths = new Set<string>();
       const remoteCleanupPaths = new Set<string>();
+      let cachePath: string | null = null;
+      let rawText = '';
+      let currentCapturedSide: CapturedCardSide | null = null;
+      let leadId = pendingFrontSide?.leadId ?? createUuid();
+      const selectedMode = captureMode ?? 'singleSided';
+      const side: CardSide = selectedMode === 'doubleSided' && pendingFrontSide ? 'back' : 'front';
+      const imageLeadId = selectedMode === 'doubleSided' ? `${leadId}-${side}` : leadId;
 
       try {
-        const selectedMode = captureMode ?? 'singleSided';
-        const side: CardSide = selectedMode === 'doubleSided' && pendingFrontSide ? 'back' : 'front';
-        const leadId = pendingFrontSide?.leadId ?? createUuid();
-        const imageLeadId = selectedMode === 'doubleSided' ? `${leadId}-${side}` : leadId;
-        const { cachePath } = await prepareImage(uri, imageLeadId);
+        const cropRegion = pendingCaptureCropRef.current;
+        pendingCaptureCropRef.current = null;
+        const prepareStartedAt = nowMs();
+        const preparedImage = await prepareImage(uri, imageLeadId, cropRegion);
+        logScanPerf('capture.prepareImage', prepareStartedAt, {
+          captureGeneration,
+          hasCropRegion: Boolean(cropRegion),
+          mode: selectedMode,
+          side
+        });
+        cachePath = preparedImage.cachePath;
         localCleanupPaths.add(cachePath);
+
         if (captureGenerationRef.current !== captureGeneration) {
+          logScanPerf('capture.cancelled.afterPrepareImage', captureStartedAt, { captureGeneration });
           return;
         }
 
-        const rawText = await extractText(cachePath);
+        setCaptureProcessing((current) => current ? { ...current, message: 'Reading card text' } : current);
+        const ocrStartedAt = nowMs();
+        rawText = await extractText(cachePath);
+        logScanPerf('capture.extractText', ocrStartedAt, {
+          captureGeneration,
+          rawTextLength: rawText.length
+        });
+
         if (captureGenerationRef.current !== captureGeneration) {
+          logScanPerf('capture.cancelled.afterExtractText', captureStartedAt, { captureGeneration });
           return;
         }
 
-        const storagePath = await uploadCardImage(cachePath, imageLeadId);
+        setCaptureProcessing((current) => current ? { ...current, message: 'Saving image to cloud' } : current);
+        const uploadStartedAt = nowMs();
+        const storagePath = await withTimeout(
+          uploadCardImage(cachePath, imageLeadId),
+          CAPTURE_CLOUD_STEP_TIMEOUT_MS,
+          'Uploading scanned card timed out.'
+        );
+        logScanPerf('capture.uploadCardImage', uploadStartedAt, { captureGeneration });
         remoteCleanupPaths.add(storagePath);
+
         if (captureGenerationRef.current !== captureGeneration) {
+          logScanPerf('capture.cancelled.afterUpload', captureStartedAt, { captureGeneration });
           return;
         }
 
-        const capturedSide: CapturedCardSide = {
+        currentCapturedSide = {
           cachePath,
           rawText,
           side,
-          storagePath
+          storagePath,
+          uploadLeadId: imageLeadId
         };
 
         if (selectedMode === 'doubleSided' && !pendingFrontSide) {
           setPendingFrontSide({
-            ...capturedSide,
+            ...currentCapturedSide,
             leadId
           });
           localCleanupPaths.delete(cachePath);
           remoteCleanupPaths.delete(storagePath);
           setPreviewUri(null);
+          logScanPerf('capture.frontSideReady', captureStartedAt, { captureGeneration });
           return;
         }
 
-        const capturedSides = pendingFrontSide
+        const capturedSides = pendingFrontSide && currentCapturedSide
           ? [
               {
-                cachePath: pendingFrontSide.cachePath,
-                rawText: pendingFrontSide.rawText,
-                side: pendingFrontSide.side,
-                storagePath: pendingFrontSide.storagePath
-              },
-              capturedSide
-            ]
-          : [capturedSide];
+              cachePath: pendingFrontSide.cachePath,
+              rawText: pendingFrontSide.rawText,
+              side: pendingFrontSide.side,
+              storagePath: pendingFrontSide.storagePath,
+              uploadLeadId: pendingFrontSide.uploadLeadId
+            },
+            currentCapturedSide
+          ]
+          : currentCapturedSide
+            ? [currentCapturedSide]
+            : [];
+
+        if (capturedSides.length === 0) {
+          throw new Error('Capture payload missing');
+        }
+
         const rawTextForReview = selectedMode === 'doubleSided'
           ? formatCardSideRawText(capturedSides)
           : rawText;
         const storagePaths = capturedSides.map((cardSide) => cardSide.storagePath);
         const cachePaths = capturedSides.map((cardSide) => cardSide.cachePath);
+        const uploadLeadIds = capturedSides.map((cardSide) => cardSide.uploadLeadId);
         cachePaths.forEach((path) => localCleanupPaths.delete(path));
         storagePaths.forEach((path) => remoteCleanupPaths.delete(path));
 
-        const parsedPreview = await parseCardPreview({
-          imagePath: storagePaths[0],
-          imagePaths: storagePaths,
-          leadId,
-          rawText: rawTextForReview,
-          teamId: captureTeamId
+        setCaptureProcessing((current) => current ? { ...current, message: 'Parsing card details' } : current);
+        const parseStartedAt = nowMs();
+        const parsedPreview = await withTimeout(
+          parseCardPreview({
+            imagePath: storagePaths[0],
+            ...(storagePaths.length > 1 ? { imagePaths: storagePaths } : {}),
+            leadId,
+            rawText: rawTextForReview,
+            teamId: captureTeamId
+          }),
+          CAPTURE_CLOUD_STEP_TIMEOUT_MS,
+          'Parsing scanned card timed out.'
+        );
+        logScanPerf('capture.parseCardPreview', parseStartedAt, {
+          captureGeneration,
+          imageCount: storagePaths.length,
+          rawTextLength: rawTextForReview.length
         });
+
         if (captureGenerationRef.current !== captureGeneration) {
+          logScanPerf('capture.cancelled.afterParse', captureStartedAt, { captureGeneration });
           return;
         }
 
@@ -2593,28 +3414,104 @@ function ScannerApp({
           rawText: rawTextForReview,
           storagePath: storagePaths[0],
           storagePaths,
+          uploadLeadIds,
           teamId: captureTeamId
         });
         setPendingFrontSide(null);
         setIsCameraOpen(false);
+        logScanPerf('capture.readyForReview', captureStartedAt, {
+          captureGeneration,
+          imageCount: storagePaths.length,
+          mode: selectedMode,
+          parseStatus: parsedPreview.parseStatus
+        });
       } catch (error) {
-        await cleanupRemoteCardImages(Array.from(remoteCleanupPaths));
-        await cleanupLocalCardImages(Array.from(localCleanupPaths));
+        logScanPerf('capture.failed', captureStartedAt, {
+          captureGeneration,
+          error: error instanceof Error ? error.name : 'UnknownError',
+          mode: selectedMode,
+          side
+        });
+        if (captureGenerationRef.current !== captureGeneration) {
+          return;
+        }
 
         if (error instanceof BlurryImageError) {
+          await cleanupRemoteCardImages(Array.from(remoteCleanupPaths));
+          await cleanupLocalCardImages(Array.from(localCleanupPaths));
           Alert.alert('Image too blurry, retake');
           return;
         }
+
+        if (cachePath && isRetryableCaptureError(error)) {
+          const queuedRawText = selectedMode === 'doubleSided' && pendingFrontSide && currentCapturedSide
+            ? formatCardSideRawText([
+                {
+                  cachePath: pendingFrontSide.cachePath,
+                  rawText: pendingFrontSide.rawText,
+                  side: pendingFrontSide.side,
+                  storagePath: pendingFrontSide.storagePath,
+                  uploadLeadId: pendingFrontSide.uploadLeadId
+                },
+                currentCapturedSide
+              ])
+            : currentCapturedSide?.rawText ?? rawText;
+
+          if (queuedRawText.trim().length > 0) {
+            const queuedImagePaths = pendingFrontSide && currentCapturedSide
+              ? [pendingFrontSide.cachePath, currentCapturedSide.cachePath]
+              : currentCapturedSide
+                ? [currentCapturedSide.cachePath]
+                : [cachePath];
+            const queuedStoragePaths = pendingFrontSide && currentCapturedSide
+              ? [pendingFrontSide.storagePath, currentCapturedSide.storagePath]
+              : currentCapturedSide?.storagePath
+                ? [currentCapturedSide.storagePath]
+                : undefined;
+            const queuedUploadLeadIds = pendingFrontSide && currentCapturedSide
+              ? [pendingFrontSide.uploadLeadId, currentCapturedSide.uploadLeadId]
+              : currentCapturedSide
+                ? [currentCapturedSide.uploadLeadId]
+                : pendingFrontSide
+                  ? [pendingFrontSide.uploadLeadId]
+                  : [imageLeadId];
+
+            queueCaptureFallback({
+              cachePath,
+              cachePaths: queuedImagePaths,
+              leadId,
+              rawText: queuedRawText,
+              ...(queuedStoragePaths ? { storagePaths: queuedStoragePaths, storagePath: queuedStoragePaths[0] } : {}),
+              uploadLeadIds: queuedUploadLeadIds,
+              teamId: captureTeamId
+            });
+            setPendingFrontSide(null);
+            setPendingScanReview(null);
+            setCaptureMode(null);
+            setIsCameraOpen(false);
+            Alert.alert(
+              'Saved offline',
+              currentCapturedSide?.storagePath
+                ? 'The scan is queued to finish parsing in the background.'
+                : 'The scan is queued and will finish when the connection returns.'
+            );
+            return;
+          }
+        }
+
+        await cleanupRemoteCardImages(Array.from(remoteCleanupPaths));
+        await cleanupLocalCardImages(Array.from(localCleanupPaths));
 
         console.error('Capture pipeline failed', error);
         Alert.alert('Scan failed', 'Please try again');
       } finally {
         if (captureGenerationRef.current === captureGeneration) {
           setPreviewUri(null);
+          stopCaptureProcessing();
         }
       }
     })();
-  }, [captureMode, captureTeamId, pendingFrontSide]);
+  }, [captureMode, captureTeamId, pendingFrontSide, queueCaptureFallback, startCaptureProcessing, stopCaptureProcessing]);
 
   const savePendingScanReview = useCallback((parsed: ParsedCard) => {
     if (!pendingScanReview) {
@@ -2666,12 +3563,8 @@ function ScannerApp({
         setPendingFrontSide(null);
         setCaptureMode(null);
         if (afterSaveBehavior === 'scan-again') {
-          if (preferredScanMode === 'ask') {
-            setIsCaptureModePickerOpen(true);
-          } else {
-            setCaptureMode(preferredScanMode);
-            setIsCameraOpen(true);
-          }
+          setCaptureMode(preferredScanMode === 'ask' ? 'singleSided' : preferredScanMode);
+          setIsCameraOpen(true);
         }
       } catch (error) {
         console.warn('Reviewed scan save failed', error);
@@ -2692,6 +3585,60 @@ function ScannerApp({
     setPendingScanReview(null);
     setPendingFrontSide(null);
     setIsSavingParsedReview(false);
+    setIsCameraOpen(true);
+  }, [pendingScanReview]);
+
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (pendingScanReview && !isSavingParsedReview) {
+        Alert.alert(
+          'Discard this scan?',
+          'Going back will throw away the current review and reopen the camera.',
+          [
+            {
+              style: 'cancel',
+              text: 'Keep reviewing'
+            },
+            {
+              style: 'destructive',
+              text: 'Discard',
+              onPress: retakePendingScanReview
+            }
+          ]
+        );
+        return true;
+      }
+
+      if (isCameraOpen) {
+        closeCamera();
+        return true;
+      }
+
+      return false;
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [closeCamera, isCameraOpen, isSavingParsedReview, pendingScanReview, retakePendingScanReview]);
+
+  const addBackSideToPendingReview = useCallback(() => {
+    if (!pendingScanReview || pendingScanReview.cachePaths.length !== 1 || pendingScanReview.storagePaths.length !== 1) {
+      return;
+    }
+
+    captureGenerationRef.current += 1;
+    setPreviewUri(null);
+    setPendingFrontSide({
+      cachePath: pendingScanReview.cachePaths[0],
+      leadId: pendingScanReview.leadId,
+      rawText: pendingScanReview.rawText,
+      side: 'front',
+      storagePath: pendingScanReview.storagePaths[0],
+      uploadLeadId: pendingScanReview.uploadLeadIds[0] ?? pendingScanReview.leadId
+    });
+    setPendingScanReview(null);
+    setCaptureMode('doubleSided');
     setIsCameraOpen(true);
   }, [pendingScanReview]);
 
@@ -2718,24 +3665,12 @@ function ScannerApp({
   const startCaptureMode = useCallback((mode: CardCaptureMode) => {
     setCaptureMode(mode);
     setPendingFrontSide(null);
-    setIsCaptureModePickerOpen(false);
     setIsCameraOpen(true);
   }, []);
 
   const openCamera = useCallback(() => {
-    if (preferredScanMode === 'ask') {
-      setIsCaptureModePickerOpen(true);
-      return;
-    }
-
-    startCaptureMode(preferredScanMode);
+    startCaptureMode(preferredScanMode === 'ask' ? 'singleSided' : preferredScanMode);
   }, [preferredScanMode, startCaptureMode]);
-
-  const cancelCaptureMode = useCallback(() => {
-    setCaptureMode(null);
-    setPendingFrontSide(null);
-    setIsCaptureModePickerOpen(false);
-  }, []);
 
   const openBatchEditor = useCallback(() => {
     batchSheetRef.current?.present();
@@ -2868,6 +3803,14 @@ function ScannerApp({
               onPromoteMember={promoteMember}
             />
           );
+        case 'queue':
+          return (
+            <QueueScreen
+              items={queue}
+              onOpenCamera={openCamera}
+              onRetry={retry}
+            />
+          );
         case 'profile':
           return (
             <ProfileScreen
@@ -2913,6 +3856,7 @@ function ScannerApp({
         isInviteCreationLoading,
         members,
         onSignOut,
+        openCamera,
         pendingBatchId,
         pendingBatchItems,
         pendingBatchScanCount,
@@ -2932,6 +3876,8 @@ function ScannerApp({
         promoteMember,
         reassignAssignment,
         removeBatchItem,
+        queue,
+        retry,
         updateAssignmentState,
         updateLeadDetails,
         displayActiveTeamName,
@@ -2951,38 +3897,31 @@ function ScannerApp({
         <ParsedCardReviewScreen
           activeTeamName={displayActiveTeamName}
           isSaving={isSavingParsedReview}
+          onAddBackSide={pendingScanReview.cachePaths.length === 1 ? addBackSideToPendingReview : null}
           review={pendingScanReview}
           onRetake={retakePendingScanReview}
           onSave={savePendingScanReview}
         />
-      ) : isCaptureModePickerOpen ? (
-        <CardCaptureModeScreen
-          activeTeamName={displayActiveTeamName}
-          onCancel={cancelCaptureMode}
-          onSelect={startCaptureMode}
-        />
       ) : isCameraOpen ? (
         <CameraScreen
           allowGallery={captureMode !== 'doubleSided'}
+          afterSaveBehavior={afterSaveBehavior}
+          captureProcessing={captureProcessing}
+          cameraFacing={cameraFacing}
+          captureMode={captureMode}
           captureHint={captureHint}
           captureTitle={captureTitle}
           handleCapture={handleCapture}
           handlePickFromGallery={handlePickFromGallery}
           handleTakePicture={handleTakePicture}
+          hasPendingFrontSide={Boolean(pendingFrontSide)}
           inFlightCount={inFlightCount}
           isCapturing={isCapturing}
-          onClose={() => {
-            if (pendingFrontSide) {
-              void cleanupRemoteCardImages([pendingFrontSide.storagePath]);
-              void cleanupLocalCardImages([pendingFrontSide.cachePath]);
-            }
-            captureGenerationRef.current += 1;
-            setPreviewUri(null);
-            setPendingFrontSide(null);
-            setCaptureMode(null);
-            setIsCameraOpen(false);
-          }}
+          onClose={closeCamera}
           onOpenQueue={() => queueSheetRef.current?.present()}
+          onRotateCamera={() => setCameraFacing((current) => (current === 'back' ? 'front' : 'back'))}
+          onToggleAfterSaveBehavior={toggleAfterSaveBehavior}
+          onToggleCaptureMode={toggleCaptureMode}
           permission={permission}
           previewUri={previewUri}
         />
@@ -3156,9 +4095,10 @@ export default function App() {
         return;
       }
 
-      const isAuthorizedRecoveryRedirect = await consumeAuthRedirectFlow(authFlowToken, 'recovery');
-      if (!isAuthorizedRecoveryRedirect) {
-        console.warn('Ignored unexpected recovery callback', { url });
+      const tokenRedirectIntent: AuthRedirectIntent = authIntent === 'recovery' ? 'recovery' : 'oauth';
+      const isAuthorizedTokenRedirect = await consumeAuthRedirectFlow(authFlowToken, tokenRedirectIntent);
+      if (!isAuthorizedTokenRedirect) {
+        console.warn('Ignored unexpected token auth callback', { authIntent, url });
         return;
       }
 
@@ -3249,92 +4189,104 @@ export default function App() {
     });
   }, []);
 
-  if (session === undefined || (session && (!isScannerStoreReady || !isInviteGateReady))) {
-    return (
-      <GestureHandlerRootView style={styles.appContainer}>
-        <AppProviders>
-          <View style={styles.loadingScreen}>
-            <ActivityIndicator size="large" />
-            <Text style={styles.loadingText} variant="titleMedium">
-              Loading account
-            </Text>
-          </View>
-        </AppProviders>
-      </GestureHandlerRootView>
-    );
-  }
-
-  if (!session) {
-    return (
-      <GestureHandlerRootView style={styles.appContainer}>
-        <AppProviders>
-          <AuthScreen />
-        </AppProviders>
-      </GestureHandlerRootView>
-    );
-  }
-
-  if (pendingInvite) {
-    return (
-      <GestureHandlerRootView style={styles.appContainer}>
-        <AppProviders>
-          <View style={styles.loadingScreen}>
-            <Surface style={styles.inviteGateCard}>
-              <Text variant="headlineSmall">Team invite pending</Text>
-              <Text style={styles.inviteGateBody} variant="bodyMedium">
-                {`Respond to the invite for ${pendingInvite.teamName ?? 'this team'} before using the scanner.`}
-              </Text>
-              <Text style={styles.inviteGateBody} variant="bodySmall">
-                {pendingInvite.invitedEmail}
-              </Text>
-              <View style={styles.inviteGateActions}>
-                <Button
-                  disabled={isInviteDecisionSubmitting}
-                  mode="outlined"
-                  onPress={() => {
-                    void respondToInvite('decline').catch((error) => {
-                      console.warn('Team invite response failed', error);
-                      Alert.alert('Invite update failed', 'Please try again.');
-                    });
-                  }}
-                  testID="decline-team-invite-button"
-                >
-                  Decline
-                </Button>
-                <Button
-                  disabled={isInviteDecisionSubmitting}
-                  loading={isInviteDecisionSubmitting}
-                  mode="contained"
-                  onPress={() => {
-                    void respondToInvite('accept').catch((error) => {
-                      console.warn('Team invite response failed', error);
-                      Alert.alert('Invite update failed', 'Please try again.');
-                    });
-                  }}
-                  testID="accept-team-invite-button"
-                >
-                  Accept
-                </Button>
-              </View>
-            </Surface>
-          </View>
-        </AppProviders>
-      </GestureHandlerRootView>
-    );
-  }
-
   return (
-    <GestureHandlerRootView style={styles.appContainer}>
-      <AppProviders>
-        <ScannerApp onSignOut={handleSignOut} session={session} workspace={teamWorkspace} />
-      </AppProviders>
-    </GestureHandlerRootView>
+    <RootErrorBoundary>
+      <GestureHandlerRootView style={styles.appContainer}>
+        <AppProviders>
+          {session === undefined || (session && (!isScannerStoreReady || !isInviteGateReady)) ? (
+            <View style={styles.loadingScreen}>
+              <ActivityIndicator size="large" />
+              <Text style={styles.loadingText} variant="titleMedium">
+                Loading account
+              </Text>
+            </View>
+          ) : !session ? (
+            <AuthScreen />
+          ) : pendingInvite ? (
+            <View style={styles.loadingScreen}>
+              <Surface style={styles.inviteGateCard}>
+                <Text variant="headlineSmall">Team invite pending</Text>
+                <Text style={styles.inviteGateBody} variant="bodyMedium">
+                  Review this team invitation before using the scanner.
+                </Text>
+                <View style={styles.inviteGateDetails}>
+                  <View style={styles.inviteGateDetailRow}>
+                    <Text variant="labelMedium">Team</Text>
+                    <Text style={styles.inviteGateDetailValue} variant="bodyMedium">
+                      {pendingInvite.teamName ?? 'Unknown team'}
+                    </Text>
+                  </View>
+                  <View style={styles.inviteGateDetailRow}>
+                    <Text variant="labelMedium">Team leader</Text>
+                    <Text style={styles.inviteGateDetailValue} variant="bodyMedium">
+                      {pendingInvite.teamLeaderEmail ?? 'Unknown leader'}
+                    </Text>
+                  </View>
+                  <View style={styles.inviteGateDetailRow}>
+                    <Text variant="labelMedium">Invited email</Text>
+                    <Text style={styles.inviteGateDetailValue} variant="bodyMedium">
+                      {pendingInvite.invitedEmail}
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.inviteGateActions}>
+                  <Button
+                    disabled={isInviteDecisionSubmitting}
+                    mode="outlined"
+                    onPress={() => {
+                      void respondToInvite('decline').catch((error) => {
+                        console.warn('Team invite response failed', error);
+                        Alert.alert('Invite update failed', 'Please try again.');
+                      });
+                    }}
+                    testID="decline-team-invite-button"
+                  >
+                    Decline
+                  </Button>
+                  <Button
+                    disabled={isInviteDecisionSubmitting}
+                    loading={isInviteDecisionSubmitting}
+                    mode="contained"
+                    onPress={() => {
+                      void respondToInvite('accept').catch((error) => {
+                        console.warn('Team invite response failed', error);
+                        Alert.alert('Invite update failed', 'Please try again.');
+                      });
+                    }}
+                    testID="accept-team-invite-button"
+                  >
+                    Accept
+                  </Button>
+                </View>
+              </Surface>
+            </View>
+          ) : (
+            <ScannerApp onSignOut={handleSignOut} session={session} workspace={teamWorkspace} />
+          )}
+        </AppProviders>
+      </GestureHandlerRootView>
+    </RootErrorBoundary>
   );
 }
 
 const styles = StyleSheet.create({
   appContainer: {
     flex: 1
+  },
+  errorMessage: {
+    marginTop: 12
+  },
+  errorScreen: {
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  errorScreenContent: {
+    maxWidth: 780,
+    padding: 24,
+    width: '100%'
+  },
+  errorStack: {
+    marginTop: 16
   },
   loadingScreen: {
     alignItems: 'center',
@@ -3359,6 +4311,21 @@ const styles = StyleSheet.create({
     padding: 20,
     width: '92%'
   },
+  inviteGateDetails: {
+    gap: 10,
+    marginTop: 16
+  },
+  inviteGateDetailRow: {
+    borderColor: 'rgba(11, 35, 66, 0.12)',
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: 3,
+    paddingHorizontal: 12,
+    paddingVertical: 10
+  },
+  inviteGateDetailValue: {
+    fontWeight: '600'
+  },
   batchActions: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -3367,25 +4334,243 @@ const styles = StyleSheet.create({
   cameraContainer: {
     flex: 1
   },
-  cameraGuidance: {
-    alignSelf: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.42)',
-    borderRadius: 18,
-    gap: 3,
+  cameraBackdropTint: {
+    ...StyleSheet.absoluteFillObject
+  },
+  cameraDimBottom: {
+    flex: 1
+  },
+  cameraDimMiddle: {
+    flexDirection: 'row',
+    width: '100%'
+  },
+  cameraDimSide: {
+    height: '100%'
+  },
+  cameraDimTop: {
+    width: '100%'
+  },
+  captureProcessingCard: {
+    alignItems: 'center',
+    borderRadius: 22,
+    gap: 10,
+    maxWidth: 320,
+    paddingHorizontal: 20,
+    paddingVertical: 18,
+    width: '100%'
+  },
+  captureProcessingOverlay: {
+    alignItems: 'center',
+    bottom: 136,
+    justifyContent: 'center',
     left: 24,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
     position: 'absolute',
     right: 24,
-    top: 112
+    top: 108,
+    zIndex: 30
+  },
+  captureProcessingTitle: {
+    textAlign: 'center'
+  },
+  cameraGuidance: {
+    alignItems: 'center',
+    bottom: 132,
+    justifyContent: 'center',
+    left: 0,
+    position: 'absolute',
+    paddingHorizontal: 20,
+    right: 0,
+    top: 96
+  },
+  cameraGuideStage: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 260,
+    width: '100%'
+  },
+  cameraGuideCopy: {
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 12,
+    maxWidth: 340,
+    paddingHorizontal: 24
+  },
+  cameraGuideFill: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 14
+  },
+  cameraGuideCornerBottomLeft: {
+    borderBottomWidth: 4,
+    borderColor: '#FFFFFF',
+    borderLeftWidth: 4,
+    borderRadius: 2,
+    height: 70,
+    width: 70
+  },
+  cameraGuideCornerBottomRight: {
+    borderBottomWidth: 4,
+    borderColor: '#FFFFFF',
+    borderRadius: 2,
+    borderRightWidth: 4,
+    height: 70,
+    width: 70
+  },
+  cameraGuideCornerTopLeft: {
+    borderColor: '#FFFFFF',
+    borderLeftWidth: 4,
+    borderRadius: 2,
+    borderTopWidth: 4,
+    height: 70,
+    width: 70
+  },
+  cameraGuideCornerTopRight: {
+    borderColor: '#FFFFFF',
+    borderRadius: 2,
+    borderRightWidth: 4,
+    borderTopWidth: 4,
+    height: 70,
+    width: 70
+  },
+  cameraGuideFrame: {
+    justifyContent: 'space-between',
+    position: 'relative',
+    width: '100%'
+  },
+  cameraGuideRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between'
+  },
+  cameraGuideRowBottom: {
+    flexDirection: 'row',
+    justifyContent: 'space-between'
+  },
+  cameraBottomTray: {
+    alignItems: 'center',
+    borderRadius: 24,
+    bottom: 8,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    left: 12,
+    minHeight: 76,
+    paddingBottom: 8,
+    paddingHorizontal: 14,
+    paddingTop: 8,
+    position: 'absolute',
+    right: 12,
+    shadowColor: '#0B2342',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 14,
+    zIndex: 20
+  },
+  cameraGuideSubtitle: {
+    color: 'rgba(255,255,255,0.82)',
+    lineHeight: 18,
+    textAlign: 'center'
+  },
+  cameraGuideTitle: {
+    color: '#FFFFFF',
+    textAlign: 'center'
+  },
+  cameraModeBadge: {
+    alignItems: 'center',
+    borderRadius: 999,
+    flexDirection: 'row',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6
+  },
+  cameraPortraitOverlay: {
+    alignItems: 'center',
+    bottom: 112,
+    justifyContent: 'center',
+    left: 20,
+    position: 'absolute',
+    right: 20,
+    top: 100
+  },
+  cameraRotateCard: {
+    alignItems: 'center',
+    borderRadius: 28,
+    gap: 14,
+    maxWidth: 360,
+    paddingHorizontal: 24,
+    paddingVertical: 28,
+    width: '100%'
+  },
+  cameraRotateHintRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8
+  },
+  cameraRotateIconWrap: {
+    alignItems: 'center',
+    borderRadius: 20,
+    height: 58,
+    justifyContent: 'center',
+    width: 58
+  },
+  cameraSideLabelLeft: {
+    color: '#FFFFFF',
+    left: -18,
+    position: 'absolute',
+    top: '50%',
+    transform: [{ rotate: '-90deg' }]
+  },
+  cameraSideLabelRight: {
+    color: '#FFFFFF',
+    position: 'absolute',
+    right: -8,
+    top: '50%',
+    transform: [{ rotate: '90deg' }]
+  },
+  cameraTrayItem: {
+    alignItems: 'center',
+    borderRadius: 12,
+    gap: 4,
+    justifyContent: 'flex-end',
+    minHeight: 54,
+    minWidth: 58,
+    paddingHorizontal: 6,
+    paddingVertical: 5
+  },
+  cameraTrayItemDisabled: {
+    opacity: 0.5
+  },
+  cameraTrayItemPressed: {
+    backgroundColor: 'rgba(49, 93, 134, 0.10)'
+  },
+  cameraTrayModeItem: {
+    minWidth: 66,
+    paddingHorizontal: 8
+  },
+  cameraTrayBatchItem: {
+    borderWidth: 0
+  },
+  cameraTraySection: {
+    alignItems: 'flex-end',
+    flex: 1,
+    flexDirection: 'row',
+    gap: 8
+  },
+  cameraTraySectionLeft: {
+    justifyContent: 'flex-start'
+  },
+  cameraTraySectionRight: {
+    gap: 2,
+    justifyContent: 'flex-end'
+  },
+  cameraTrayCaptureSpacer: {
+    flexShrink: 0,
+    width: 108
   },
   cameraTopBar: {
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'space-between',
-    left: 16,
+    left: 20,
     position: 'absolute',
-    right: 16,
+    right: 20,
     top: 48,
     zIndex: 5
   },
@@ -3489,9 +4674,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between'
   },
   parsedReviewPanel: {
-    borderRadius: 22,
+    borderRadius: 18,
     gap: 12,
-    padding: 12
+    padding: 14,
+    shadowColor: '#0B2342',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12
   },
   parsedReviewSectionHeader: {
     gap: 4,
@@ -3529,6 +4718,8 @@ const styles = StyleSheet.create({
   reviewBlockCountBadge: {
     alignItems: 'center',
     borderRadius: 999,
+    flexDirection: 'row',
+    gap: 6,
     minWidth: 26,
     paddingHorizontal: 8,
     paddingVertical: 4
@@ -3536,17 +4727,19 @@ const styles = StyleSheet.create({
   reviewBlockActions: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 6,
-    marginTop: 8
+    gap: 4,
+    marginTop: 6
   },
   reviewBlockChip: {
-    borderRadius: 16,
+    borderRadius: 8,
     borderWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden',
-    padding: 12
+    paddingHorizontal: 12,
+    paddingVertical: 10
   },
   reviewBlockList: {
-    gap: 8
+    gap: 6,
+    marginTop: 6
   },
   reviewBlockPressable: {
     gap: 8
@@ -3575,15 +4768,106 @@ const styles = StyleSheet.create({
   },
   selectedReviewBlockBanner: {
     alignItems: 'center',
-    borderRadius: 18,
+    borderRadius: 10,
     borderWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
-    gap: 10,
-    padding: 12
+    gap: 8,
+    marginHorizontal: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 8
   },
   selectedReviewBlockCopy: {
     flex: 1,
     gap: 2
+  },
+  reviewBackButton: {
+    alignItems: 'center',
+    height: 40,
+    justifyContent: 'center',
+    width: 40
+  },
+  reviewContent: {
+    gap: 10,
+    paddingHorizontal: 6,
+    paddingTop: 2
+  },
+  reviewFieldList: {
+    gap: 8
+  },
+  reviewFooter: {
+    alignItems: 'center',
+    borderTopColor: 'rgba(11, 35, 66, 0.08)',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingTop: 8
+  },
+  reviewFooterPrimaryButton: {
+    borderRadius: 10,
+    flex: 1,
+    minHeight: 50
+  },
+  reviewFooterSecondaryButton: {
+    borderRadius: 10,
+    flex: 1,
+    minHeight: 50
+  },
+  reviewHeaderCopy: {
+    alignItems: 'center',
+    flex: 1,
+    gap: 2
+  },
+  reviewHeaderMeta: {
+    alignItems: 'flex-end',
+    minWidth: 34
+  },
+  reviewHeroRow: {
+    alignItems: 'stretch',
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 16
+  },
+  reviewPreviewAction: {
+    alignItems: 'center',
+    borderRadius: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    gap: 4,
+    justifyContent: 'center',
+    minHeight: 72,
+    paddingHorizontal: 6,
+    paddingVertical: 8,
+    shadowColor: '#0B2342',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6
+  },
+  reviewPreviewActions: {
+    flex: 1,
+    gap: 6
+  },
+  reviewPreviewCard: {
+    borderRadius: 10,
+    flex: 1.7,
+    overflow: 'hidden',
+    shadowColor: '#0B2342',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 10
+  },
+  reviewPreviewImage: {
+    aspectRatio: 1.6,
+    width: '100%'
+  },
+  reviewScreen: {
+    flex: 1
+  },
+  reviewTopBar: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingTop: 2
   },
   historyAvatar: {
     alignItems: 'center',
@@ -3653,6 +4937,36 @@ const styles = StyleSheet.create({
     gap: 12,
     padding: 12
   },
+  queueRow: {
+    alignItems: 'center',
+    borderRadius: 8,
+    flexDirection: 'row',
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12
+  },
+  queueRowCopy: {
+    flex: 1
+  },
+  queueStatsRow: {
+    flexDirection: 'row',
+    gap: 10,
+    width: '100%'
+  },
+  queueStatPill: {
+    alignItems: 'flex-start',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 8,
+    flex: 1,
+    gap: 2,
+    paddingHorizontal: 12,
+    paddingVertical: 10
+  },
+  queueThumb: {
+    borderRadius: 8,
+    height: 52,
+    width: 52
+  },
   palettePanel: {
     borderRadius: 8,
     gap: 18,
@@ -3688,6 +5002,59 @@ const styles = StyleSheet.create({
   },
   profileHeroCopy: {
     flex: 1
+  },
+  profileFieldActionButton: {
+    alignItems: 'center',
+    height: 28,
+    justifyContent: 'center',
+    width: 28
+  },
+  profileFieldActions: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 4,
+    paddingLeft: 4
+  },
+  profileFieldCard: {
+    borderRadius: 8,
+    gap: 2,
+    marginHorizontal: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    shadowColor: '#0B2342',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6
+  },
+  profileFieldContent: {
+    alignItems: 'center',
+    flex: 1,
+    flexDirection: 'row',
+    gap: 8
+  },
+  profileFieldCopy: {
+    flex: 1,
+    gap: 0
+  },
+  profileFieldIconWrap: {
+    alignItems: 'center',
+    borderRadius: 10,
+    height: 34,
+    justifyContent: 'center',
+    width: 34
+  },
+  profileFieldInput: {
+    backgroundColor: 'transparent',
+    fontSize: 15,
+    fontWeight: '500',
+    minHeight: 26,
+    paddingHorizontal: 0,
+    paddingVertical: 0
+  },
+  profileFieldInputWrap: {
+    gap: 0,
+    minHeight: 28,
+    paddingVertical: 0
   },
   profileAccountInfo: {
     alignItems: 'center',

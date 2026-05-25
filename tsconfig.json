@@ -3,5 +3,5 @@
   "compilerOptions": {
     "strict": true
   },
-  "exclude": [".sandcastle", "supabase/functions"]
+  "exclude": [".sandcastle", "dist", "supabase/functions", "admin-web"]
 }

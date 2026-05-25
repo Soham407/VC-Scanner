@@ -1,9 +1,9 @@
-import { BottomSheetFlatList, BottomSheetModal, BottomSheetView } from '@gorhom/bottom-sheet';
 import { forwardRef, useMemo, type ForwardedRef } from 'react';
 import { Image, StyleSheet, View } from 'react-native';
 import { Button, Chip, Text } from '../design/openDesign';
 
 import type { ScannerQueueItem } from '../../store/scanner';
+import { BottomSheetFlatList, BottomSheetModal, BottomSheetView, type BottomSheetModalHandle } from './bottomSheet';
 import { useAppTheme } from '../theme/materialTheme';
 
 type QueueSheetProps = {
@@ -19,7 +19,7 @@ const statusCopy: Record<ScannerQueueItem['status'], string> = {
 
 function QueueSheetImpl(
   { items, onRetry }: QueueSheetProps,
-  ref: ForwardedRef<BottomSheetModal>
+  ref: ForwardedRef<BottomSheetModalHandle>
 ) {
   const snapPoints = useMemo(() => ['45%', '80%'], []);
   const theme = useAppTheme();

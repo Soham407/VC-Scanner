@@ -66,14 +66,14 @@ export function CaptureButton({ disabled, onCapture, placement = 'bottom', takeP
         style={({ pressed }) => [
           styles.captureButton,
           {
-            borderColor: pressed ? theme.colors.primary : theme.colors.outlineVariant,
-            backgroundColor: pressed ? theme.colors.primaryContainer : theme.colors.surfaceContainerHigh
+            borderColor: pressed ? theme.colors.secondary : '#D7DEE7',
+            backgroundColor: '#FFFFFF'
           },
           disabled && styles.captureButtonDisabled
         ]}
         testID="capture-button"
       >
-        <View style={[styles.captureButtonInner, { backgroundColor: theme.colors.primary }]} />
+        <View style={[styles.captureButtonInner, { backgroundColor: '#D9DDE5' }]} />
       </Pressable>
     </Animated.View>
   );
@@ -82,25 +82,26 @@ export function CaptureButton({ disabled, onCapture, placement = 'bottom', takeP
 const styles = StyleSheet.create({
   captureButton: {
     alignItems: 'center',
-    borderRadius: 44,
-    borderWidth: 6,
-    height: 88,
+    borderRadius: 34,
+    borderWidth: 5,
+    height: 68,
     justifyContent: 'center',
     shadowColor: '#000000',
     shadowOffset: {
-      height: 12,
+      height: 6,
       width: 0
     },
-    shadowOpacity: 0.22,
-    shadowRadius: 18,
-    width: 80
+    shadowOpacity: 0.16,
+    shadowRadius: 10,
+    width: 68
   },
   captureButtonAnchor: {
     position: 'absolute'
   },
   captureButtonAnchorBottom: {
     alignSelf: 'center',
-    bottom: 32
+    bottom: 22,
+    zIndex: 30
   },
   captureButtonAnchorRight: {
     marginTop: -44,
@@ -111,8 +112,8 @@ const styles = StyleSheet.create({
     opacity: 0.45
   },
   captureButtonInner: {
-    borderRadius: 32,
-    height: 64,
-    width: 64
+    borderRadius: 23,
+    height: 46,
+    width: 46
   }
 });

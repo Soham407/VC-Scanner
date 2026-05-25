@@ -1,4 +1,3 @@
-import { BottomSheetModal, BottomSheetView } from '@gorhom/bottom-sheet';
 import { forwardRef, useMemo, type ForwardedRef } from 'react';
 import { Image, ScrollView, StyleSheet, View } from 'react-native';
 import { Button, Chip, Surface, Text, TextInput } from '../design/openDesign';
@@ -6,6 +5,7 @@ import { Button, Chip, Surface, Text, TextInput } from '../design/openDesign';
 import type { TeamInboxItem } from '../lib/teamInbox';
 import type { TeamMember } from '../lib/teamMembers';
 import type { TeamWorkerAllocation } from '../lib/teamAssignments';
+import { BottomSheetModal, BottomSheetView, type BottomSheetModalHandle } from './bottomSheet';
 import { useAppTheme } from '../theme/materialTheme';
 
 type TeamAssignmentBatchSheetProps = {
@@ -32,7 +32,7 @@ function TeamAssignmentBatchSheetImpl(
     onRemoveItem,
     onChangeAllocation
   }: TeamAssignmentBatchSheetProps,
-  ref: ForwardedRef<BottomSheetModal>
+  ref: ForwardedRef<BottomSheetModalHandle>
 ) {
   const snapPoints = useMemo(() => ['58%', '90%'], []);
   const theme = useAppTheme();

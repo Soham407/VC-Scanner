@@ -1,4 +1,4 @@
-package com.anonymous.vcscanner
+package com.vsscanner.app
 
 import android.app.Application
 import android.content.res.Configuration

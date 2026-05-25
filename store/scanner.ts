@@ -27,8 +27,12 @@ export type SystemNotice = {
 type EnqueueInput = {
   id: string;
   imagePath: string;
+  imagePaths?: string[];
   rawText: string;
   teamId?: string | null;
+  storagePath?: string;
+  storagePaths?: string[];
+  uploadLeadIds?: string[];
 };
 type ScannerQueueDeps = ScanPipelineDeps;
 
@@ -37,7 +41,7 @@ export type ScannerQueueState = {
   history: ScannerHistoryItem[];
   systemNotice: SystemNotice | null;
   enqueue: (item: EnqueueInput) => void;
-  markUploaded: (id: string, storagePath: string) => void;
+  markUploaded: (id: string, storagePath: string | string[]) => void;
   markFailed: (id: string, error: string) => void;
   recordHistory: (item: Omit<ScannerHistoryItem, 'savedAt'> & { savedAt?: number }) => void;
   replaceHistory: (items: ScannerHistoryItem[]) => void;
@@ -54,6 +58,9 @@ type ScannerQueueStoreOptions = {
 };
 
 const STORAGE_PREFIX = 'scanner-queue';
+const HISTORY_DIRECTORY_NAME = 'history';
+const LOCAL_HISTORY_MAX_ITEMS = 20;
+const LOCAL_HISTORY_RETENTION_MS = 24 * 60 * 60 * 1000;
 let storageNamespace = 'signed-out';
 let isPersistenceSuppressed = false;
 
@@ -73,18 +80,71 @@ const namespacedAsyncStorage = {
   }
 };
 
+function getHistoryDirectory(): string | null {
+  const cacheDirectory = FileSystem.cacheDirectory;
+  return cacheDirectory ? `${cacheDirectory}${HISTORY_DIRECTORY_NAME}/` : null;
+}
+
+function pruneLocalHistoryItems(history: ScannerHistoryItem[], now = Date.now()): ScannerHistoryItem[] {
+  return history
+    .filter((item) => now - item.savedAt <= LOCAL_HISTORY_RETENTION_MS)
+    .slice(0, LOCAL_HISTORY_MAX_ITEMS);
+}
+
+async function syncArchivedHistoryFiles(history: ScannerHistoryItem[]): Promise<void> {
+  const historyDirectory = getHistoryDirectory();
+  if (!historyDirectory) {
+    return;
+  }
+
+  try {
+    await FileSystem.makeDirectoryAsync(historyDirectory, { intermediates: true });
+
+    const keepPaths = new Set(
+      history
+        .map((item) => item.imagePath)
+        .filter((path) => path.startsWith(historyDirectory))
+    );
+
+    const filenames = await FileSystem.readDirectoryAsync(historyDirectory);
+    await Promise.all(
+      filenames.map((filename) => {
+        const path = `${historyDirectory}${filename}`;
+        if (keepPaths.has(path)) {
+          return Promise.resolve();
+        }
+
+        return FileSystem.deleteAsync(path, { idempotent: true });
+      })
+    );
+  } catch {
+    // Best-effort cleanup only.
+  }
+}
+
+async function clearArchivedHistoryFiles(): Promise<void> {
+  await syncArchivedHistoryFiles([]);
+}
+
 function createScannerQueueState(pipeline: ReturnType<typeof createScanPipeline>) {
   return (set: (updater: (state: ScannerQueueState) => Partial<ScannerQueueState>) => void, get: () => ScannerQueueState): ScannerQueueState => ({
     queue: [],
     history: [],
     systemNotice: null,
     enqueue: (item) => {
+      const imagePaths = item.imagePaths?.length ? item.imagePaths : [item.imagePath];
+      const storagePaths = item.storagePaths?.length ? item.storagePaths : item.storagePath ? [item.storagePath] : [];
+      const uploadLeadIds = item.uploadLeadIds?.length ? item.uploadLeadIds : undefined;
+
       set((state) => ({
         queue: [
           ...state.queue,
           {
             id: item.id,
             imagePath: item.imagePath,
+            ...(imagePaths.length > 1 ? { imagePaths } : {}),
+            ...(storagePaths.length > 0 ? { storagePath: storagePaths[0], storagePaths } : {}),
+            ...(uploadLeadIds ? { uploadLeadIds } : {}),
             ...(item.teamId !== undefined ? { teamId: item.teamId } : {}),
             ...(item.rawText ? { rawText: item.rawText } : {}),
             retryCount: 0,
@@ -97,6 +157,7 @@ function createScannerQueueState(pipeline: ReturnType<typeof createScanPipeline>
       set(() => ({
         history: []
       }));
+      void clearArchivedHistoryFiles();
     },
     clearSystemNotice: () => {
       set(() => ({
@@ -104,13 +165,15 @@ function createScannerQueueState(pipeline: ReturnType<typeof createScanPipeline>
       }));
     },
     markUploaded: (id, storagePath) => {
+      const storagePaths = Array.isArray(storagePath) ? storagePath : [storagePath];
       set((state) => ({
         queue: state.queue.map((item) =>
           item.id === id
             ? {
               ...item,
               status: 'parsing',
-              storagePath,
+              storagePath: storagePaths[0],
+              ...(storagePaths.length > 1 ? { storagePaths } : {}),
               nextAttemptAt: undefined,
               error: undefined
             }
@@ -119,26 +182,30 @@ function createScannerQueueState(pipeline: ReturnType<typeof createScanPipeline>
       }));
     },
     recordHistory: (item) => {
-      set((state) => ({
+      const nextHistory = pruneLocalHistoryItems([
+        {
+          ...item,
+          savedAt: item.savedAt ?? Date.now()
+        },
+        ...get().history.filter((existing) => existing.id !== item.id)
+      ]);
+
+      set(() => ({
         systemNotice: {
           createdAt: Date.now(),
           kind: 'success',
           message: 'Scan saved to cloud',
           title: 'Saved'
         },
-        history: [
-          {
-            ...item,
-            savedAt: item.savedAt ?? Date.now()
-          },
-          ...state.history.filter((existing) => existing.id !== item.id)
-        ]
+        history: nextHistory
       }));
+      void syncArchivedHistoryFiles(nextHistory);
     },
     replaceHistory: (items) => {
       set(() => ({
         history: items
       }));
+      void syncArchivedHistoryFiles(items);
     },
     markFailed: (id, error) => {
       set((state) => ({
@@ -166,7 +233,7 @@ function createScannerQueueState(pipeline: ReturnType<typeof createScanPipeline>
           item.id === id
             ? {
               ...item,
-              status: item.storagePath ? 'parsing' : 'uploading',
+              status: item.storagePaths?.length || item.storagePath ? 'parsing' : 'uploading',
               retryCount: 0,
               nextAttemptAt: undefined,
               error: undefined
@@ -211,7 +278,7 @@ export function createScannerQueueStore(
       skipHydration: options.skipHydration ?? false,
       storage: createJSONStorage(() => namespacedAsyncStorage),
       partialize: (state) => ({
-        queue: state.queue.map(({ rawText, ...item }) => item),
+        queue: state.queue,
         history: []
       })
     })
@@ -235,6 +302,7 @@ export async function syncScannerQueueStoreNamespace(userId: string | null): Pro
   }
 
   storageNamespace = nextNamespace;
+  await clearArchivedHistoryFiles();
 
   if (userId) {
     await scannerQueueStore.persist.rehydrate();
@@ -256,7 +324,7 @@ export async function garbageCollectOrphanedQueueImages(queue: ScannerQueueItem[
 
   const deletions = cacheFiles
     .map((filename) => {
-      const match = filename.match(/^lead-([a-f0-9-]+)\.jpg$/i);
+      const match = filename.match(/^lead-([a-f0-9-]+?)(?:-(?:front|back))?\.jpg$/i);
       if (!match) {
         return null;
       }

@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 
+import { getWebAuthRedirectUrl } from './authRedirect';
 import { supabase, supabaseConfigError } from './supabase';
 
 type AuthContextValue = {
@@ -54,7 +55,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const trimmed = email.trim();
         if (!trimmed) throw new Error('Email is required');
 
-        const redirectTo = `${window.location.origin}/`;
+        const redirectTo = getWebAuthRedirectUrl();
         const { error } = await supabase.auth.signInWithOtp({
           email: trimmed,
           options: { emailRedirectTo: redirectTo }
@@ -64,10 +65,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signInWithGoogle: async () => {
         if (supabaseConfigError) throw new Error(supabaseConfigError);
 
+        const redirectTo = getWebAuthRedirectUrl();
         const { error } = await supabase.auth.signInWithOAuth({
           provider: 'google',
           options: {
-            redirectTo: `${window.location.origin}/`
+            redirectTo
           }
         });
         if (error) throw new Error(error.message);

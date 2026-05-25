@@ -2,7 +2,7 @@ import React from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
-import { Alert, Linking, Text, View } from 'react-native';
+import { Alert, AppState, Linking, Text, View } from 'react-native';
 
 import App from '../App';
 import { BlurryImageError } from '../lib/ocr';
@@ -16,6 +16,7 @@ const mockDeleteCardImages = jest.fn();
 const mockParseCardPreview = jest.fn();
 const mockSaveParsedCard = jest.fn();
 const mockEnqueue = jest.fn();
+const mockMarkUploaded = jest.fn();
 const mockRecordHistory = jest.fn();
 const mockRetry = jest.fn();
 const mockDrainOnce = jest.fn();
@@ -228,6 +229,8 @@ jest.mock('../store/scanner', () => ({
   syncScannerQueueStoreNamespace: (...args: unknown[]) => mockSyncScannerQueueStoreNamespace(...args),
   scannerQueueStore: {
     getState: () => ({
+      enqueue: mockEnqueue,
+      markUploaded: mockMarkUploaded,
       history: mockHistory,
       queue: mockQueue,
       replaceHistory: jest.fn(),
@@ -239,6 +242,7 @@ jest.mock('../store/scanner', () => ({
     history: mockHistory,
     systemNotice: mockSystemNotice,
     enqueue: mockEnqueue,
+    markUploaded: mockMarkUploaded,
     recordHistory: mockRecordHistory,
     replaceHistory: jest.fn(),
     clearHistory: jest.fn(),
@@ -312,12 +316,6 @@ jest.mock('expo-camera', () => {
 
 async function openCamera(): Promise<void> {
   fireEvent.press(screen.getByTestId('camera-fab'));
-
-  await act(async () => {
-    await Promise.resolve();
-  });
-
-  fireEvent.press(screen.getByTestId('single-sided-capture-button'));
 
   await act(async () => {
     await Promise.resolve();
@@ -531,6 +529,7 @@ describe('App permissions flow', () => {
         id: 'invite-1',
         teamId: 'team-1',
         teamName: 'Main Team',
+        teamLeaderEmail: 'leader@example.com',
         createdAt: '2026-05-02T11:00:00.000Z',
         invitedEmail: 'user@example.com'
       }
@@ -539,6 +538,8 @@ describe('App permissions flow', () => {
     await renderAppReady();
 
     expect(screen.getByText('Team invite pending')).toBeTruthy();
+    expect(screen.getByText('Main Team')).toBeTruthy();
+    expect(screen.getByText('leader@example.com')).toBeTruthy();
     expect(screen.queryAllByText('Dashboard')).toHaveLength(0);
 
     fireEvent.press(screen.getByTestId('accept-team-invite-button'));
@@ -572,6 +573,72 @@ describe('App permissions flow', () => {
     expect(openSettingsSpy).toHaveBeenCalledTimes(1);
   });
 
+  it('refreshes camera permission after returning from settings', async () => {
+    const openSettingsSpy = jest.spyOn(Linking, 'openSettings').mockResolvedValue();
+    let appStateHandler: ((state: 'active') => void) | null = null;
+    jest.spyOn(AppState, 'addEventListener').mockImplementation((event, handler) => {
+      if (event === 'change') {
+        appStateHandler = handler as (state: 'active') => void;
+      }
+
+      return {
+        remove: jest.fn()
+      };
+    });
+
+    mockUseCameraPermissions.mockImplementation(() => {
+      const ReactRuntime = require('react');
+      const [status, setStatus] = ReactRuntime.useState({
+        canAskAgain: false,
+        granted: false
+      });
+      const refreshPermission = jest.fn().mockImplementation(async () => {
+        const nextStatus = {
+          canAskAgain: true,
+          granted: true
+        };
+        setStatus(nextStatus);
+        return nextStatus;
+      });
+
+      return [status, jest.fn(), refreshPermission];
+    });
+
+    await renderAppReady();
+    await openCamera();
+
+    expect(screen.getByText('Camera permission needed')).toBeTruthy();
+    fireEvent.press(screen.getByText('Open Settings'));
+    expect(openSettingsSpy).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      appStateHandler?.('active');
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId('camera-viewfinder')).toBeTruthy();
+    expect(screen.queryByText('Camera permission needed')).toBeNull();
+  });
+
+  it('lets the user back out of the denied camera screen', async () => {
+    mockUseCameraPermissions.mockReturnValue([
+      { granted: false, canAskAgain: false },
+      jest.fn()
+    ]);
+
+    await renderAppReady();
+    await openCamera();
+
+    fireEvent.press(screen.getByText('Go back'));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId('camera-fab')).toBeTruthy();
+    expect(screen.queryByText('Go back')).toBeNull();
+  });
+
   it('renders dashboard first and opens camera viewfinder when permission is granted', async () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
 
@@ -586,6 +653,19 @@ describe('App permissions flow', () => {
     expect(screen.queryByTestId('card-alignment-frame')).toBeNull();
     expect(screen.getByTestId('capture-button')).toBeTruthy();
     expect(screen.queryByText('Open Settings')).toBeNull();
+  });
+
+  it('does not prompt for camera permission until the scanner is opened', async () => {
+    const requestPermission = jest.fn();
+    mockUseCameraPermissions.mockReturnValue([undefined, requestPermission]);
+
+    await renderAppReady();
+
+    expect(requestPermission).not.toHaveBeenCalled();
+
+    await openCamera();
+
+    expect(requestPermission).toHaveBeenCalledTimes(1);
   });
 
   it('renders a history button when completed scans exist', async () => {
@@ -646,6 +726,7 @@ describe('App permissions flow', () => {
     await renderAppReady();
 
     expect(screen.queryByText('Team')).toBeNull();
+    expect(screen.getAllByText('Queue').length).toBeGreaterThan(0);
 
     fireEvent.press(screen.getAllByText('History')[0]);
 
@@ -690,6 +771,8 @@ describe('App permissions flow', () => {
       await Promise.resolve();
       await Promise.resolve();
     });
+
+    expect(screen.queryByText('Queue')).toBeNull();
 
     fireEvent.press(screen.getByText('Team'));
 
@@ -1320,13 +1403,12 @@ describe('App permissions flow', () => {
     expect(ImagePicker.launchImageLibraryAsync).toHaveBeenCalledWith({
       quality: 1
     });
-    expect(mockPrepareImage).toHaveBeenCalledWith('file:///tmp/gallery-card.jpg', leadId);
+    expect(mockPrepareImage).toHaveBeenCalledWith('file:///tmp/gallery-card.jpg', leadId, null);
     expect(mockExtractText).toHaveBeenCalledWith('file:///cache/lead-5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg');
     expect(mockUploadCardImage).toHaveBeenCalledWith('file:///cache/lead-5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg', leadId);
     expect(mockParseCardPreview).toHaveBeenCalledWith({
       teamId: 'team-77',
       imagePath: 'card-images/user-1/5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg',
-      imagePaths: ['card-images/user-1/5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg'],
       leadId,
       rawText: 'John Doe\nAcme Corp\nSales Manager'
     });
@@ -1370,6 +1452,27 @@ describe('App permissions flow', () => {
     expect(screen.queryByTestId('pick-from-gallery-button')).toBeNull();
   });
 
+  it('toggles the after-save camera tray tab between single and batch', async () => {
+    await renderAppReady();
+    await openCamera();
+
+    fireEvent.press(screen.getByTestId('toggle-after-save-behavior-button'));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText('Batch')).toBeTruthy();
+
+    fireEvent.press(screen.getByTestId('toggle-after-save-behavior-button'));
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText('Batch')).toBeNull();
+  });
+
   it('captures once per tap burst while the capture call is in flight', async () => {
     mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
 
@@ -1396,6 +1499,8 @@ describe('App permissions flow', () => {
       skipProcessing: true
     });
     expect(screen.getByTestId('capture-button').props.accessibilityState?.disabled).toBe(true);
+    expect(screen.getByTestId('capture-processing-overlay')).toBeTruthy();
+    expect(screen.getByText('Capturing photo')).toBeTruthy();
 
     await act(async () => {
       resolveCapture?.({
@@ -1448,7 +1553,7 @@ describe('App permissions flow', () => {
       await Promise.resolve();
     });
 
-    fireEvent.press(screen.getByTestId('double-sided-capture-button'));
+    fireEvent.press(screen.getByTestId('toggle-capture-mode-button'));
     await act(async () => {
       await Promise.resolve();
     });
@@ -1513,7 +1618,7 @@ describe('App permissions flow', () => {
       await Promise.resolve();
     });
 
-    expect(mockPrepareImage).toHaveBeenCalledWith('file:///tmp/card.jpg', leadId);
+    expect(mockPrepareImage).toHaveBeenCalledWith('file:///tmp/card.jpg', leadId, null);
     expect(mockExtractText).toHaveBeenCalledWith('file:///cache/lead-5b8d3c26-7d8d-43d5-8ea0-6bcd260b89f8.jpg');
     expect(screen.getByText('Review parsed fields')).toBeTruthy();
     expect(mockEnqueue).not.toHaveBeenCalled();
@@ -1560,6 +1665,54 @@ describe('App permissions flow', () => {
     expect(screen.queryByTestId('capture-preview')).toBeNull();
     expect(screen.queryByText('Review parsed fields')).toBeNull();
     expect(alertSpy).not.toHaveBeenCalled();
+  });
+
+  it('queues the scan when the cloud save fails so the image is not lost', async () => {
+    const alertSpy = jest.spyOn(Alert, 'alert').mockImplementation(jest.fn());
+    mockUseCameraPermissions.mockReturnValue([{ granted: true }, jest.fn()]);
+    mockTakePictureAsync.mockResolvedValue({
+      height: 100,
+      uri: 'file:///tmp/card.jpg',
+      width: 200
+    });
+    const leadId = 'lead-offline-1';
+    Object.defineProperty(globalThis, 'crypto', {
+      configurable: true,
+      value: {
+        ...(globalThis.crypto ?? {}),
+        randomUUID: jest.fn().mockReturnValue(leadId)
+      }
+    });
+    mockPrepareImage.mockResolvedValue({
+      cachePath: 'file:///cache/lead-offline.jpg'
+    });
+    mockExtractText.mockResolvedValue('John Doe\nAcme Corp\nSales Manager');
+    mockUploadCardImage.mockRejectedValue(new Error('network request failed'));
+
+    await renderAppReady();
+    await openCamera();
+
+    fireEvent.press(screen.getByTestId('capture-button'));
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockEnqueue).toHaveBeenCalledWith({
+      id: leadId,
+      imagePath: 'file:///cache/lead-offline.jpg',
+      imagePaths: ['file:///cache/lead-offline.jpg'],
+      rawText: 'John Doe\nAcme Corp\nSales Manager',
+      uploadLeadIds: [leadId],
+      teamId: null
+    });
+    expect(mockParseCardPreview).not.toHaveBeenCalled();
+    expect(screen.queryByText('Review parsed fields')).toBeNull();
+    expect(alertSpy).toHaveBeenCalledWith(
+      'Saved offline',
+      'The scan is queued and will finish when the connection returns.'
+    );
   });
 
   it('reenables reviewed save when both save paths fail', async () => {

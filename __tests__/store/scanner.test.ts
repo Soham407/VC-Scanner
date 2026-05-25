@@ -2,6 +2,13 @@ jest.mock('@react-native-async-storage/async-storage', () =>
   require('@react-native-async-storage/async-storage/jest/async-storage-mock')
 );
 
+jest.mock('expo-file-system/legacy', () => ({
+  cacheDirectory: 'file:///cache/',
+  deleteAsync: jest.fn().mockResolvedValue(undefined),
+  makeDirectoryAsync: jest.fn().mockResolvedValue(undefined),
+  readDirectoryAsync: jest.fn().mockResolvedValue([])
+}));
+
 jest.mock('../../src/lib/scanCard', () => ({
   invokeScanCard: jest.fn()
 }));
@@ -19,8 +26,10 @@ jest.mock('../../src/lib/supabase', () => ({
 }));
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as FileSystem from 'expo-file-system/legacy';
 import {
   createScannerQueueStore,
+  garbageCollectOrphanedQueueImages,
   scannerQueueStore,
   syncScannerQueueStoreNamespace
 } from '../../store/scanner';
@@ -93,6 +102,8 @@ describe('scanner queue store', () => {
       }
     ]);
 
+    expect(await AsyncStorage.getItem('scanner-queue:user-1:scanner-queue')).toContain('"rawText":"User one"');
+
     await syncScannerQueueStoreNamespace('user-2');
     expect(scannerQueueStore.getState().queue).toMatchObject([
       {
@@ -100,6 +111,8 @@ describe('scanner queue store', () => {
         status: 'uploading'
       }
     ]);
+
+    expect(await AsyncStorage.getItem('scanner-queue:user-2:scanner-queue')).toContain('"rawText":"User two"');
   });
 
   it('markUploaded advances item to parsing', () => {
@@ -228,6 +241,89 @@ it('retry resets failed item to uploading, clears error, and resets retryCount t
       message: 'Scan saved to cloud',
       createdAt: expect.any(Number)
     });
+  });
+
+  it('recordHistory trims local history and deletes archived files that are no longer retained', async () => {
+    const store = createTestStore();
+    const readDirectoryAsync = jest.mocked(FileSystem.readDirectoryAsync);
+    const deleteAsync = jest.mocked(FileSystem.deleteAsync);
+
+    readDirectoryAsync.mockResolvedValueOnce(['lead-old.jpg', 'lead-keep.jpg']);
+
+    const now = Date.now();
+    store.getState().recordHistory({
+      id: 'lead-keep',
+      imagePath: 'file:///cache/history/lead-keep.jpg',
+      parsed: {
+        address: null,
+        companyName: null,
+        email: null,
+        fullName: null,
+        jobTitle: null,
+        phoneNumber: null,
+        productServices: null
+      },
+      parseStatus: 'parsed',
+      rawText: 'Keep me',
+      savedAt: now,
+      storagePath: 'card-images/user-1/lead-keep.jpg'
+    });
+
+    store.getState().recordHistory({
+      id: 'lead-expired',
+      imagePath: 'file:///cache/history/lead-expired.jpg',
+      parsed: {
+        address: null,
+        companyName: null,
+        email: null,
+        fullName: null,
+        jobTitle: null,
+        phoneNumber: null,
+        productServices: null
+      },
+      parseStatus: 'parsed',
+      rawText: 'Expire me',
+      savedAt: now - (25 * 60 * 60 * 1000),
+      storagePath: 'card-images/user-1/lead-expired.jpg'
+    });
+
+    await flushPersistedState();
+
+    expect(store.getState().history).toEqual([
+      expect.objectContaining({
+        id: 'lead-keep'
+      })
+    ]);
+    expect(deleteAsync).toHaveBeenCalledWith('file:///cache/history/lead-old.jpg', { idempotent: true });
+  });
+
+  it('garbageCollectOrphanedQueueImages deletes orphaned single and double sided cache files', async () => {
+    const readDirectoryAsync = jest.mocked(FileSystem.readDirectoryAsync);
+    const deleteAsync = jest.mocked(FileSystem.deleteAsync);
+
+    readDirectoryAsync.mockResolvedValueOnce([
+      'lead-aaaa1111.jpg',
+      'lead-aaaa1111-front.jpg',
+      'lead-bbbb2222.jpg',
+      'lead-bbbb2222-back.jpg',
+      'ignore-me.txt'
+    ]);
+    deleteAsync.mockClear();
+
+    await garbageCollectOrphanedQueueImages([
+      {
+        id: 'aaaa1111',
+        imagePath: 'file:///cache/lead-aaaa1111.jpg',
+        rawText: 'Keep',
+        retryCount: 0,
+        status: 'uploading'
+      }
+    ]);
+
+    expect(deleteAsync).toHaveBeenCalledWith('file:///cache/lead-bbbb2222.jpg', { idempotent: true });
+    expect(deleteAsync).toHaveBeenCalledWith('file:///cache/lead-bbbb2222-back.jpg', { idempotent: true });
+    expect(deleteAsync).not.toHaveBeenCalledWith('file:///cache/lead-aaaa1111.jpg', { idempotent: true });
+    expect(deleteAsync).not.toHaveBeenCalledWith('file:///cache/lead-aaaa1111-front.jpg', { idempotent: true });
   });
 
   it('drainOnce retries retryable failures with per-item backoff and fails after the 3rd retry', async () => {

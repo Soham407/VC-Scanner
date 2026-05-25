@@ -1,4 +1,4 @@
-package com.anonymous.vcscanner
+package com.vsscanner.app
 
 import android.os.Build
 import android.os.Bundle

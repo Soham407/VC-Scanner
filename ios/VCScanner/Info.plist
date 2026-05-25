@@ -3,7 +3,7 @@
 <plist version="1.0">
   <dict>
     <key>CADisableMinimumFrameDurationOnPhone</key>
-    <true/>
+    <false/>
     <key>CFBundleDevelopmentRegion</key>
     <string>$(DEVELOPMENT_LANGUAGE)</string>
     <key>CFBundleDisplayName</key>
@@ -28,7 +28,7 @@
         <key>CFBundleURLSchemes</key>
         <array>
           <string>vcscanner</string>
-          <string>com.anonymous.vcscanner</string>
+          <string>com.vsscanner.app</string>
         </array>
       </dict>
     </array>
@@ -59,7 +59,7 @@
     <false/>
     <key>UIStatusBarStyle</key>
     <string>UIStatusBarStyleDefault</string>
-    <key>UISupportedInterfaceOrientations</key>
+    <key>UISupportedInterfaceOrientations~iphone</key>
     <array>
       <string>UIInterfaceOrientationPortrait</string>
       <string>UIInterfaceOrientationPortraitUpsideDown</string>

@@ -1,9 +1,9 @@
-import { BottomSheetFlatList, BottomSheetModal, BottomSheetView } from '@gorhom/bottom-sheet';
 import { forwardRef, useMemo, type ForwardedRef } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 import { Chip, Text as PaperText } from '../design/openDesign';
 
 import type { ScannerHistoryItem } from '../../store/scanner';
+import { BottomSheetFlatList, BottomSheetModal, BottomSheetView, type BottomSheetModalHandle } from './bottomSheet';
 import { useAppTheme } from '../theme/materialTheme';
 
 type RecentScansSheetProps = {
@@ -12,7 +12,7 @@ type RecentScansSheetProps = {
 
 function RecentScansSheetImpl(
   { items }: RecentScansSheetProps,
-  ref: ForwardedRef<BottomSheetModal>
+  ref: ForwardedRef<BottomSheetModalHandle>
 ) {
   const snapPoints = useMemo(() => ['36%', '72%'], []);
   const theme = useAppTheme();

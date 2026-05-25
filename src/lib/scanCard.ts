@@ -51,12 +51,15 @@ export class ScanCardInvokeError extends Error {
 }
 
 async function invokeScanCardFunction(body: Record<string, unknown>): Promise<InvokeScanCardResponse> {
-  const { data, error } = await supabase.functions.invoke<ScanCardFunctionSuccess | ScanCardFunctionFailure>(
-    'scan-card',
-    {
+  const action = typeof body.action === 'string' ? body.action : undefined;
+  const response = await supabase.functions.invoke<ScanCardFunctionSuccess | ScanCardFunctionFailure>('scan-card', {
+    body
+  });
+  const { data, error } = errorShouldRetry(response.error, action)
+    ? await supabase.functions.invoke<ScanCardFunctionSuccess | ScanCardFunctionFailure>('scan-card', {
       body
-    }
-  );
+    })
+    : response;
 
   if (error) {
     const detailMessage = await extractErrorMessage(error);
@@ -74,6 +77,15 @@ async function invokeScanCardFunction(body: Record<string, unknown>): Promise<In
     parseStatus: data.parseStatus,
     parsed: data.parsed
   };
+}
+
+function errorShouldRetry(error: unknown, action: string | undefined): boolean {
+  if (action !== 'parse' || typeof error !== 'object' || error === null) {
+    return false;
+  }
+
+  const message = (error as { message?: unknown }).message;
+  return typeof message === 'string' && /network request failed/i.test(message);
 }
 
 async function extractErrorMessage(error: unknown): Promise<string | undefined> {

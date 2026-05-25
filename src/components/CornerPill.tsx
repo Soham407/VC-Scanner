@@ -19,19 +19,20 @@ export function CornerPill({ count, onPress }: CornerPillProps): JSX.Element | n
     <Animated.View
       entering={FadeInDown.duration(motion.duration.medium1).easing(motion.easing.emphasized)}
       exiting={FadeOutUp.duration(motion.duration.short4).easing(motion.easing.emphasizedExit)}
-      layout={LinearTransition.springify().damping(18).stiffness(420)}
       style={styles.pill}
     >
-      <Chip
-        accessibilityLabel={`${count} card${count === 1 ? '' : 's'} saving`}
-        compact
-        icon="cloud-sync"
-        mode="flat"
-        onPress={onPress}
-        testID="saving-pill"
-      >
-        {`Saving ${count}`}
-      </Chip>
+      <Animated.View layout={LinearTransition.springify().damping(18).stiffness(420)}>
+        <Chip
+          accessibilityLabel={`${count} card${count === 1 ? '' : 's'} saving`}
+          compact
+          icon="cloud-sync"
+          mode="flat"
+          onPress={onPress}
+          testID="saving-pill"
+        >
+          {`Saving ${count}`}
+        </Chip>
+      </Animated.View>
     </Animated.View>
   );
 }

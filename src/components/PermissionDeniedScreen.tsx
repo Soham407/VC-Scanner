@@ -2,10 +2,14 @@ import { JSX } from 'react';
 import { Linking, StyleSheet, View } from 'react-native';
 import { Button, Surface, Text } from '../design/openDesign';
 
-import { AppLogo } from './AppLogo';
 import { useAppTheme } from '../theme/materialTheme';
+import { AppLogo } from './AppLogo';
 
-export function PermissionDeniedScreen(): JSX.Element {
+type PermissionDeniedScreenProps = {
+  onGoBack: () => void;
+};
+
+export function PermissionDeniedScreen({ onGoBack }: PermissionDeniedScreenProps): JSX.Element {
   const theme = useAppTheme();
 
   const handleOpenSettings = (): void => {
@@ -35,9 +39,14 @@ export function PermissionDeniedScreen(): JSX.Element {
             3. Return and scan
           </Text>
         </View>
-        <Button icon="cog" mode="contained" onPress={handleOpenSettings}>
-          Open Settings
-        </Button>
+        <View style={styles.actions}>
+          <Button icon="arrow-left" mode="outlined" onPress={onGoBack}>
+            Go back
+          </Button>
+          <Button icon="cog" mode="contained" onPress={handleOpenSettings}>
+            Open Settings
+          </Button>
+        </View>
       </Surface>
     </Surface>
   );
@@ -60,6 +69,12 @@ const styles = StyleSheet.create({
     maxWidth: 420,
     padding: 20,
     width: '100%'
+  },
+  actions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    justifyContent: 'center'
   },
   header: {
     alignItems: 'center',

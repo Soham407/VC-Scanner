@@ -1,6 +1,13 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { SaveFormat, manipulateAsync } from 'expo-image-manipulator';
 
+export type ImageCropRegion = {
+  height: number;
+  originX: number;
+  originY: number;
+  width: number;
+};
+
 function createUuid(): string {
   const randomUuid = globalThis.crypto?.randomUUID;
   if (typeof randomUuid === 'function') {
@@ -14,7 +21,7 @@ function createUuid(): string {
   });
 }
 
-export async function prepareImage(uri: string, leadId?: string): Promise<{ cachePath: string }> {
+export async function prepareImage(uri: string, leadId?: string, cropRegion?: ImageCropRegion | null): Promise<{ cachePath: string }> {
   const cacheDirectory = FileSystem.cacheDirectory;
 
   if (!cacheDirectory) {
@@ -23,7 +30,10 @@ export async function prepareImage(uri: string, leadId?: string): Promise<{ cach
 
   const manipulatedImage = await manipulateAsync(
     uri,
-    [{ resize: { width: 1200 } }],
+    [
+      ...(cropRegion ? [{ crop: cropRegion }] : []),
+      { resize: { width: 1200 } }
+    ],
     {
       compress: 0.8,
       format: SaveFormat.JPEG

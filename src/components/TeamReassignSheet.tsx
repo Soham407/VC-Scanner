@@ -1,10 +1,10 @@
-import { BottomSheetModal, BottomSheetView } from '@gorhom/bottom-sheet';
 import { forwardRef, useMemo, type ForwardedRef } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { Button, Chip, Surface, Text } from '../design/openDesign';
 
 import type { TeamInboxItem } from '../lib/teamInbox';
 import type { TeamMember } from '../lib/teamMembers';
+import { BottomSheetModal, BottomSheetView, type BottomSheetModalHandle } from './bottomSheet';
 import { useAppTheme } from '../theme/materialTheme';
 
 type TeamReassignSheetProps = {
@@ -21,7 +21,7 @@ function TeamReassignSheetImpl(
     members,
     onReassign
   }: TeamReassignSheetProps,
-  ref: ForwardedRef<BottomSheetModal>
+  ref: ForwardedRef<BottomSheetModalHandle>
 ) {
   const snapPoints = useMemo(() => ['52%', '86%'], []);
   const theme = useAppTheme();

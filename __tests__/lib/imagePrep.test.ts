@@ -49,6 +49,33 @@ describe('prepareImage', () => {
     expect(result.cachePath).toMatch(/^file:\/\/\/cache\/image-[a-f0-9-]+\.jpg$/);
   });
 
+  it('crops before resizing when a crop region is provided', async () => {
+    (manipulateAsync as jest.Mock).mockResolvedValue({
+      height: 900,
+      uri: 'file:///tmp/prepared.jpg',
+      width: 1200
+    });
+
+    await prepareImage('file:///tmp/input.jpg', 'lead-1', {
+      height: 700,
+      originX: 100,
+      originY: 80,
+      width: 420
+    });
+
+    expect(manipulateAsync).toHaveBeenCalledWith(
+      'file:///tmp/input.jpg',
+      [
+        { crop: { height: 700, originX: 100, originY: 80, width: 420 } },
+        { resize: { width: 1200 } }
+      ],
+      {
+        compress: 0.8,
+        format: SaveFormat.JPEG
+      }
+    );
+  });
+
   it('throws when cache directory is unavailable', async () => {
     const originalCacheDirectory = FileSystem.cacheDirectory;
     Object.defineProperty(FileSystem, 'cacheDirectory', {

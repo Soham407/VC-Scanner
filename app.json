@@ -19,7 +19,7 @@
         "NSPhotoLibraryUsageDescription": "VC Scanner needs photo library access to pick business card images in development."
       },
       "supportsTablet": true,
-      "bundleIdentifier": "com.anonymous.vcscanner"
+      "bundleIdentifier": "com.vsscanner.app"
     },
     "android": {
       "adaptiveIcon": {
@@ -37,7 +37,7 @@
       ],
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.vcscanner"
+      "package": "com.vsscanner.app"
     },
     "plugins": [
       [

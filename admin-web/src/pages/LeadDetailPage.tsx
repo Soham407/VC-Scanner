@@ -19,7 +19,8 @@ export function LeadDetailPage({
   const navigate = useNavigate();
   const [lead, setLead] = useState<Lead | null>(null);
   const [members, setMembers] = useState<TeamMember[]>([]);
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [primaryImageUrl, setPrimaryImageUrl] = useState<string | null>(null);
+  const [secondaryImageUrl, setSecondaryImageUrl] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [reassignTo, setReassignTo] = useState('');
@@ -28,7 +29,8 @@ export function LeadDetailPage({
   useEffect(() => {
     if (!leadId) return;
     setLead(null);
-    setImageUrl(null);
+    setPrimaryImageUrl(null);
+    setSecondaryImageUrl(null);
     setError(null);
     loadLead(leadId, teamId)
       .then(setLead)
@@ -44,13 +46,18 @@ export function LeadDetailPage({
 
   useEffect(() => {
     let active = true;
-    void getLeadImageUrl(lead?.imagePath ?? null).then((url) => {
-      if (active) setImageUrl(url);
+    void Promise.all([
+      getLeadImageUrl(lead?.imagePath ?? null),
+      getLeadImageUrl(lead?.secondaryImagePath ?? null)
+    ]).then(([primary, secondary]) => {
+      if (!active) return;
+      setPrimaryImageUrl(primary);
+      setSecondaryImageUrl(secondary);
     });
     return () => {
       active = false;
     };
-  }, [lead?.imagePath]);
+  }, [lead?.imagePath, lead?.secondaryImagePath]);
 
   if (!lead) {
     return <section className="page-stack">{error ? <p className="error-text">{error}</p> : <div className="card">Loading lead...</div>}</section>;
@@ -183,8 +190,21 @@ export function LeadDetailPage({
 
           <div className="card">
             <div className="eyebrow">Metadata</div>
-            {imageUrl ? (
-              <img className="lead-image" src={imageUrl} alt="Scanned business card" />
+            {primaryImageUrl || secondaryImageUrl ? (
+              <div className="card-image-stack">
+                {primaryImageUrl ? (
+                  <figure className="card-image-figure">
+                    <img className="lead-image" src={primaryImageUrl} alt="Scanned business card front" />
+                    <figcaption className="muted">Front side</figcaption>
+                  </figure>
+                ) : null}
+                {secondaryImageUrl ? (
+                  <figure className="card-image-figure">
+                    <img className="lead-image" src={secondaryImageUrl} alt="Scanned business card back" />
+                    <figcaption className="muted">Back side</figcaption>
+                  </figure>
+                ) : null}
+              </div>
             ) : (
               <EmptyState title="No card image">This lead has no available card image or the image link could not be opened.</EmptyState>
             )}

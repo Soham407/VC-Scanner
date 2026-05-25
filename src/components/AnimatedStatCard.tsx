@@ -85,36 +85,37 @@ export function AnimatedStatCard({
   return (
     <Animated.View
       entering={FadeInDown.delay(delay).duration(motion.duration.medium1).easing(motion.easing.emphasized)}
-      layout={LinearTransition.springify().damping(24).stiffness(300)}
       style={styles.wrap}
     >
-      <Animated.View style={cardStyle}>
-        <Pressable
-          accessibilityRole="button"
-          onPressIn={() => {
-            pressProgress.value = 1;
-          }}
-          onPressOut={() => {
-            pressProgress.value = 0;
-          }}
-        >
-          <Surface
-            elevation={1}
-            style={[
-              styles.card,
-              {
-                backgroundColor: theme.colors.surfaceContainerHigh
-              }
-            ]}
+      <Animated.View layout={LinearTransition.springify().damping(24).stiffness(300)}>
+        <Animated.View style={cardStyle}>
+          <Pressable
+            accessibilityRole="button"
+            onPressIn={() => {
+              pressProgress.value = 1;
+            }}
+            onPressOut={() => {
+              pressProgress.value = 0;
+            }}
           >
-            <Text style={{ color: accentColor }} variant="headlineSmall">
-              {displayValue}
-            </Text>
-            <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelLarge">
-              {label}
-            </Text>
-          </Surface>
-        </Pressable>
+            <Surface
+              elevation={1}
+              style={[
+                styles.card,
+                {
+                  backgroundColor: theme.colors.surfaceContainerHigh
+                }
+              ]}
+            >
+              <Text style={{ color: accentColor }} variant="headlineSmall">
+                {displayValue}
+              </Text>
+              <Text style={{ color: theme.colors.onSurfaceVariant }} variant="labelLarge">
+                {label}
+              </Text>
+            </Surface>
+          </Pressable>
+        </Animated.View>
       </Animated.View>
     </Animated.View>
   );

@@ -64,11 +64,12 @@ describe('teamInvites', () => {
   });
 
   it('lists pending invites for the signed-in email in oldest-first order', async () => {
-    const order = jest.fn().mockResolvedValue({
+    (supabase.rpc as jest.Mock).mockResolvedValue({
       data: [
         {
           team_id: 'team-1',
-          teams: { name: 'Main Team' },
+          team_name: 'Main Team',
+          team_leader_email: 'leader@example.com',
           created_at: '2026-05-02T10:00:00.000Z',
           id: 'invite-1',
           invited_email: 'user@example.com'
@@ -76,25 +77,19 @@ describe('teamInvites', () => {
       ],
       error: null
     });
-    const eqStatus = jest.fn().mockReturnValue({ order });
-    const eqInvitedEmail = jest.fn().mockReturnValue({ eq: eqStatus });
-    const select = jest.fn().mockReturnValue({ eq: eqInvitedEmail });
-    (supabase.from as jest.Mock).mockReturnValue({ select });
 
     await expect(listPendingTeamInvitesForEmail('User@Example.com')).resolves.toEqual([
       {
         teamId: 'team-1',
         teamName: 'Main Team',
+        teamLeaderEmail: 'leader@example.com',
         createdAt: '2026-05-02T10:00:00.000Z',
         id: 'invite-1',
         invitedEmail: 'user@example.com'
       }
     ]);
 
-    expect(supabase.from).toHaveBeenCalledWith('team_invites');
-    expect(eqInvitedEmail).toHaveBeenCalledWith('invited_email_normalized', 'user@example.com');
-    expect(eqStatus).toHaveBeenCalledWith('status', 'pending');
-    expect(order).toHaveBeenCalledWith('created_at', { ascending: true });
+    expect(supabase.rpc).toHaveBeenCalledWith('list_pending_team_invites_for_current_user');
   });
 
   it('responds to an invite through the secure RPC workflow', async () => {

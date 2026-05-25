@@ -16,6 +16,7 @@ type LeadRow = {
   full_name: string | null;
   id: string;
   image_url: string | null;
+  secondary_image_url: string | null;
   job_title: string | null;
   parse_status: 'parsed' | 'unparsed';
   phone_number: string | null;
@@ -45,6 +46,7 @@ const LEAD_SELECT_FIELDS = [
   'email',
   'phone_number',
   'image_url',
+  'secondary_image_url',
   'raw_ocr_text',
   'parse_status',
   'created_at'
@@ -77,6 +79,7 @@ function mapLead(row: LeadRow): Lead {
     fullName: row.full_name,
     id: row.id,
     imagePath: row.image_url,
+    secondaryImagePath: row.secondary_image_url,
     jobTitle: row.job_title,
     parseStatus: row.parse_status,
     phoneNumber: row.phone_number,
@@ -240,8 +243,13 @@ export async function updateLeadDetails(leadId: string, updates: {
 export async function getLeadImageUrl(path: string | null): Promise<string | null> {
   if (!path) return null;
   if (/^https?:\/\//i.test(path)) return path;
-  const { data, error } = await supabase.storage.from('card-images').createSignedUrl(path, 60 * 15);
-  if (error) return null;
+
+  const storagePath = path.startsWith('card-images/') ? path.slice('card-images/'.length) : path;
+  const { data, error } = await supabase.storage.from('card-images').createSignedUrl(storagePath, 60 * 15);
+  if (error) {
+    return null;
+  }
+
   return data.signedUrl;
 }
 

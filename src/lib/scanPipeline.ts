@@ -11,8 +11,11 @@ export type ScanQueueItem = {
   id: string;
   status: ScanQueueItemStatus;
   imagePath: string;
+  imagePaths?: string[];
   teamId?: string | null;
   storagePath?: string;
+  storagePaths?: string[];
+  uploadLeadIds?: string[];
   rawText?: string;
   retryCount: number;
   nextAttemptAt?: number;
@@ -34,14 +37,14 @@ export type ScanPipelineDeps = {
   deleteImage: (imagePath: string) => Promise<void>;
   extractText?: (imagePath: string) => Promise<string>;
   getSessionUserId: () => Promise<string>;
-  invokeScanCard: (params: { imagePath: string; leadId: string; rawText: string; teamId?: string | null }) => Promise<InvokeScanCardResponse>;
+  invokeScanCard: (params: { imagePath: string; imagePaths?: string[]; leadId: string; rawText: string; teamId?: string | null }) => Promise<InvokeScanCardResponse>;
   uploadCardImage: (localPath: string, leadId: string) => Promise<string>;
 };
 
 export type ScanPipelineStoreApi = {
   getQueue: () => ScanQueueItem[];
   markFailed: (id: string, error: string) => void;
-  markUploaded: (id: string, storagePath: string) => void;
+  markUploaded: (id: string, storagePath: string | string[]) => void;
   remove: (id: string) => void;
   recordHistory: (item: Omit<ScanHistoryItem, 'savedAt'> & { savedAt?: number }) => void;
   updateQueue: (updater: (queue: ScanQueueItem[]) => ScanQueueItem[]) => void;
@@ -191,6 +194,18 @@ export function createDefaultScanPipelineDeps(): ScanPipelineDeps {
 }
 
 export function createScanPipeline(deps: ScanPipelineDeps) {
+  function getQueueImagePaths(item: ScanQueueItem): string[] {
+    return item.imagePaths?.length ? item.imagePaths : [item.imagePath];
+  }
+
+  function getQueueStoragePaths(item: ScanQueueItem): string[] {
+    if (item.storagePaths?.length) {
+      return item.storagePaths;
+    }
+
+    return item.storagePath ? [item.storagePath] : [];
+  }
+
   return {
     async drainOnce(api: ScanPipelineStoreApi): Promise<void> {
       const now = Date.now();
@@ -207,8 +222,22 @@ export function createScanPipeline(deps: ScanPipelineDeps) {
       try {
         if (queuedItem.status === 'uploading') {
           await deps.getSessionUserId();
-          const storagePath = await deps.uploadCardImage(queuedItem.imagePath, queuedItem.id);
-          api.markUploaded(queuedItem.id, storagePath);
+          const imagePaths = getQueueImagePaths(queuedItem);
+          const uploadLeadIds = queuedItem.uploadLeadIds?.length ? queuedItem.uploadLeadIds : [queuedItem.id];
+          const existingStoragePaths = getQueueStoragePaths(queuedItem);
+          const uploadedStoragePaths = [...existingStoragePaths];
+
+          for (let index = existingStoragePaths.length; index < imagePaths.length; index += 1) {
+            const imagePath = imagePaths[index];
+            const uploadLeadId = uploadLeadIds[index] ?? queuedItem.id;
+            const storagePath = await deps.uploadCardImage(imagePath, uploadLeadId);
+            uploadedStoragePaths[index] = storagePath;
+          }
+
+          api.markUploaded(
+            queuedItem.id,
+            uploadedStoragePaths.length === 1 ? uploadedStoragePaths[0] : uploadedStoragePaths
+          );
         }
 
         const parsingItem = api.getQueue().find((item) => item.id === queuedItem.id);
@@ -228,11 +257,14 @@ export function createScanPipeline(deps: ScanPipelineDeps) {
           throw new Error('Queue item missing rawText');
         }
 
-        const archivedImagePath = await deps.archiveImage(parsingItem.imagePath, parsingItem.id);
+        const imagePaths = getQueueImagePaths(parsingItem);
+        const storagePaths = getQueueStoragePaths(parsingItem);
+        const archivedImagePath = await deps.archiveImage(imagePaths[0], parsingItem.id);
 
         const scanResult = await deps.invokeScanCard({
           teamId: parsingItem.teamId ?? null,
-          imagePath: parsingItem.storagePath,
+          imagePath: storagePaths[0],
+          ...(storagePaths.length > 1 ? { imagePaths: storagePaths } : {}),
           leadId: parsingItem.id,
           rawText
         });
@@ -247,7 +279,7 @@ export function createScanPipeline(deps: ScanPipelineDeps) {
         });
 
         api.remove(parsingItem.id);
-        await deps.deleteImage(parsingItem.imagePath);
+        await Promise.all(imagePaths.map((imagePath) => deps.deleteImage(imagePath)));
       } catch (error) {
         const currentItem = api.getQueue().find((item) => item.id === queuedItem.id);
         if (!currentItem) {

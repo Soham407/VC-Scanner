@@ -7,7 +7,9 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
+    "web:build": "expo export --platform web",
     "test": "jest",
+    "test:supabase-functions": "deno test --allow-env --allow-net supabase/functions/scan-card/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -34,11 +36,13 @@
     "expo-web-browser": "~15.0.11",
     "groq-sdk": "^1.1.2",
     "react": "19.1.0",
+    "react-dom": "^19.1.0",
     "react-native": "0.81.5",
     "react-native-gesture-handler": "~2.28.0",
     "react-native-reanimated": "~4.1.1",
     "react-native-safe-area-context": "~5.6.0",
     "react-native-screens": "~4.16.0",
+    "react-native-web": "^0.21.2",
     "react-native-worklets": "0.5.1",
     "zod": "^4.4.1",
     "zustand": "^5.0.12"
@@ -53,6 +57,19 @@
     "react-native-dotenv": "^3.4.11",
     "react-test-renderer": "^19.1.0",
     "typescript": "~5.9.2"
+  },
+  "expo": {
+    "doctor": {
+      "appConfigFieldsNotSyncedCheck": {
+        "enabled": false
+      },
+      "reactNativeDirectoryCheck": {
+        "exclude": [
+          "@react-native-ml-kit/text-recognition"
+        ],
+        "listUnknownPackages": true
+      }
+    }
   },
   "private": true
 }

@@ -18,7 +18,9 @@ function createApi(initialQueue: ScanQueueItem[]) {
   return {
     getQueue: () => queue,
     markFailed: jest.fn(),
-    markUploaded: jest.fn((id: string, storagePath: string) => {
+    markUploaded: jest.fn((id: string, storagePath: string | string[]) => {
+      const storagePaths = Array.isArray(storagePath) ? storagePath : [storagePath];
+
       queue = queue.map((item) =>
         item.id === id
           ? {
@@ -26,7 +28,8 @@ function createApi(initialQueue: ScanQueueItem[]) {
             error: undefined,
             nextAttemptAt: undefined,
             status: 'parsing',
-            storagePath
+            storagePath: storagePaths[0],
+            ...(storagePaths.length > 1 ? { storagePaths } : {})
           }
           : item
       );

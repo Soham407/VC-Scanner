@@ -521,7 +521,20 @@ textarea {
   border: 1px solid var(--line);
   border-radius: 8px;
   display: block;
+}
+
+.card-image-stack {
+  display: grid;
+  gap: 1rem;
   margin-bottom: 1rem;
+}
+
+.card-image-figure {
+  margin: 0;
+}
+
+.card-image-figure figcaption {
+  margin-top: 0.5rem;
 }
 
 .raw-text {

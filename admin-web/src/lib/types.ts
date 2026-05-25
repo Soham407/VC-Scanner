@@ -34,6 +34,7 @@ export type Lead = {
   fullName: string | null;
   id: string;
   imagePath: string | null;
+  secondaryImagePath: string | null;
   jobTitle: string | null;
   parseStatus: 'parsed' | 'unparsed';
   phoneNumber: string | null;

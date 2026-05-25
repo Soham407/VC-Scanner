@@ -64,7 +64,12 @@ export function LoginPage() {
             <span>Email</span>
             <div className="input-wrap">
               <Mail size={16} />
-              <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder="leader@company.com" />
+              <input
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="leader@company.com"
+                type="email"
+                value={email}
+              />
             </div>
           </label>
           <button className="primary-button" disabled={loading || Boolean(supabaseConfigError) || !email.trim()}>
