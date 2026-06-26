@@ -115,6 +115,10 @@ function isRetryableError(error: unknown): boolean {
       return true;
     }
 
+    if (status === 429) {
+      return true;
+    }
+
     if (status >= 400) {
       return false;
     }

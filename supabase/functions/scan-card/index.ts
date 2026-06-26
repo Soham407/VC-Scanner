@@ -1,6 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { z } from "npm:zod";
 import { createJsonCompletion } from "./groqClient.ts";
+import { createGeminiJsonCompletion } from "./geminiClient.ts";
 import { mapToDb } from "./mapToDb.ts";
 import {
   coerceParsedCard,
@@ -10,6 +11,7 @@ import {
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");
 const GROQ_API_KEY = Deno.env.get("GROQ_API_KEY");
+const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
 const STORAGE_BUCKET = "card-images";
 const MAX_REQUEST_BODY_BYTES = 1_048_576;
 const MAX_RAW_TEXT_LENGTH = 100_000;
@@ -23,7 +25,6 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Max-Age": "86400",
 };
-const SCAN_CARD_PERF_TAG = "[SCAN-CARD-PERF]";
 
 const requestSchema = z.object({
   action: z.enum(["parse", "save", "saveParsed"]).optional(),
@@ -67,21 +68,6 @@ function requireEnv(name: string, value: string | undefined): string {
   }
 
   return value;
-}
-
-function nowMs(): number {
-  return typeof globalThis.performance?.now === "function" ? globalThis.performance.now() : Date.now();
-}
-
-function formatDurationMs(startedAt: number): string {
-  return `${Math.round(nowMs() - startedAt)}ms`;
-}
-
-function logScanCardPerf(event: string, startedAt: number, details?: Record<string, unknown>): void {
-  console.info(SCAN_CARD_PERF_TAG, event, {
-    duration: formatDurationMs(startedAt),
-    ...details,
-  });
 }
 
 function normalizeStoragePath(imagePath: string): string {
@@ -153,40 +139,43 @@ function getErrorMessage(error: unknown): string {
 }
 
 async function parseCardFromImage(params: {
-  apiKey: string;
   imageBlobs: Blob[];
   rawText: string;
 }): Promise<ReturnType<typeof coerceParsedCard>> {
-  const imageEncodingStartedAt = nowMs();
   const imageDataUrls = await Promise.all(
     params.imageBlobs.map(async (imageBlob) => {
       const imageBase64 = arrayBufferToBase64(await imageBlob.arrayBuffer());
       return `data:${imageBlob.type || "image/jpeg"};base64,${imageBase64}`;
     }),
   );
-  logScanCardPerf("parse.imageDataUrlEncoding", imageEncodingStartedAt, {
-    imageCount: params.imageBlobs.length,
-    imageSizes: params.imageBlobs.map((imageBlob) => imageBlob.size),
-    rawTextLength: params.rawText.length,
-  });
 
-  const groqStartedAt = nowMs();
+  // Gemini Flash-Lite is primary (faster + more accurate); Groq is the fallback
+  // so a Gemini outage or rate limit never blocks a scan.
+  if (GEMINI_API_KEY) {
+    try {
+      const llmPayload = await createGeminiJsonCompletion({
+        apiKey: GEMINI_API_KEY,
+        rawText: params.rawText,
+        imageDataUrls,
+      });
+      return coerceParsedCard(llmPayload);
+    } catch (error) {
+      console.error("gemini parse failed, falling back to groq", error);
+    }
+  }
+
+  const groqApiKey = requireEnv("GROQ_API_KEY", GROQ_API_KEY);
   const llmPayload = await createJsonCompletion({
-    apiKey: params.apiKey,
+    apiKey: groqApiKey,
     rawText: params.rawText,
     imageDataUrls,
-  });
-  logScanCardPerf("parse.groqCompletion", groqStartedAt, {
-    imageCount: imageDataUrls.length,
-    rawTextLength: params.rawText.length,
   });
 
   return coerceParsedCard(llmPayload);
 }
 
 async function downloadRequestedImages(supabase: any, requestedImagePaths: string[]): Promise<Blob[]> {
-  const downloadStartedAt = nowMs();
-  const imageBlobs = await Promise.all(requestedImagePaths.map(async (path) => {
+  return await Promise.all(requestedImagePaths.map(async (path) => {
     const { data: imageBlob, error: downloadError } = await supabase.storage
       .from(STORAGE_BUCKET)
       .download(path);
@@ -197,16 +186,9 @@ async function downloadRequestedImages(supabase: any, requestedImagePaths: strin
 
     return imageBlob;
   }));
-  logScanCardPerf("request.downloadImages", downloadStartedAt, {
-    imageCount: imageBlobs.length,
-    imageSizes: imageBlobs.map((imageBlob) => imageBlob.size),
-  });
-
-  return imageBlobs;
 }
 
 export async function handleScanCardRequest(req: Request): Promise<Response> {
-  const requestStartedAt = nowMs();
   if (req.method === "OPTIONS") {
     return new Response(null, {
       headers: CORS_HEADERS,
@@ -231,11 +213,7 @@ export async function handleScanCardRequest(req: Request): Promise<Response> {
     }
   }
 
-  const readBodyStartedAt = nowMs();
   const requestBodyText = await req.text();
-  logScanCardPerf("request.readBody", readBodyStartedAt, {
-    bytes: new TextEncoder().encode(requestBodyText).byteLength,
-  });
   if (new TextEncoder().encode(requestBodyText).byteLength > MAX_REQUEST_BODY_BYTES) {
     return jsonResponse({ ok: false, error: "Request body too large" }, 413);
   }
@@ -265,9 +243,7 @@ export async function handleScanCardRequest(req: Request): Promise<Response> {
       },
     });
 
-    const authStartedAt = nowMs();
     const { data: userData, error: authError } = await supabase.auth.getUser();
-    logScanCardPerf("request.authGetUser", authStartedAt, { action });
     if (authError || !userData.user) {
       return jsonResponse({ ok: false, error: "Unauthorized" }, 401);
     }
@@ -285,17 +261,9 @@ export async function handleScanCardRequest(req: Request): Promise<Response> {
     const imageBlobResults = await downloadRequestedImages(supabase, downloadPaths);
 
     if (action !== "saveParsed") {
-      const groqApiKey = requireEnv("GROQ_API_KEY", GROQ_API_KEY);
-      const parseStartedAt = nowMs();
       parsed = await parseCardFromImage({
-        apiKey: groqApiKey,
         imageBlobs: imageBlobResults,
         rawText: bodyResult.data.rawText,
-      });
-      logScanCardPerf("request.parseCardFromImage", parseStartedAt, {
-        action,
-        imageCount: imageBlobResults.length,
-        rawTextLength: bodyResult.data.rawText.length,
       });
     }
 
@@ -306,11 +274,6 @@ export async function handleScanCardRequest(req: Request): Promise<Response> {
     const parseStatus = getParseStatus(parsed);
 
     if (action === "parse") {
-      logScanCardPerf("request.completed", requestStartedAt, {
-        action,
-        imageCount: imageBlobResults.length,
-        parseStatus,
-      });
       return jsonResponse({
         ok: true,
         leadId: bodyResult.data.leadId,
@@ -321,7 +284,6 @@ export async function handleScanCardRequest(req: Request): Promise<Response> {
 
     const dbFields = mapToDb(parsed);
 
-    const insertStartedAt = nowMs();
     const { error: insertError } = await supabase
       .from("scanned_leads")
       .insert({
@@ -334,17 +296,11 @@ export async function handleScanCardRequest(req: Request): Promise<Response> {
         raw_ocr_text: bodyResult.data.rawText,
         parse_status: parseStatus,
       });
-    logScanCardPerf("request.insertLead", insertStartedAt, { action, parseStatus });
 
     if (insertError) {
       return jsonResponse({ ok: false, error: "Insert failed" }, 500);
     }
 
-    logScanCardPerf("request.completed", requestStartedAt, {
-      action,
-      imageCount: imageBlobResults.length,
-      parseStatus,
-    });
     return jsonResponse({
       ok: true,
       leadId: bodyResult.data.leadId,
@@ -352,9 +308,6 @@ export async function handleScanCardRequest(req: Request): Promise<Response> {
       parseStatus,
     });
   } catch (error) {
-    logScanCardPerf("request.failed", requestStartedAt, {
-      error: error instanceof Error ? error.name : "UnknownError",
-    });
     console.error("scan-card failed", error);
     return jsonResponse({ ok: false, error: getErrorMessage(error) }, 500);
   }
