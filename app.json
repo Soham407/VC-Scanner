@@ -37,7 +37,8 @@
       ],
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.vsscanner.app"
+      "package": "com.vsscanner.app",
+      "versionCode": 2
     },
     "plugins": [
       [

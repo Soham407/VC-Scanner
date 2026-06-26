@@ -458,8 +458,6 @@ export function Snackbar({ action, children, onDismiss, testID, visible }: Snack
   );
 }
 
-export const ActivityIndicator = NativeActivityIndicator;
-
 const styles = StyleSheet.create({
   button: {
     alignItems: 'center',

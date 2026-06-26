@@ -8,19 +8,6 @@ export type ImageCropRegion = {
   width: number;
 };
 
-function createUuid(): string {
-  const randomUuid = globalThis.crypto?.randomUUID;
-  if (typeof randomUuid === 'function') {
-    return randomUuid.call(globalThis.crypto);
-  }
-
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (char) => {
-    const random = Math.floor(Math.random() * 16);
-    const value = char === 'x' ? random : (random & 0x3) | 0x8;
-    return value.toString(16);
-  });
-}
-
 export async function prepareImage(uri: string, leadId?: string, cropRegion?: ImageCropRegion | null): Promise<{ cachePath: string }> {
   const cacheDirectory = FileSystem.cacheDirectory;
 
@@ -40,7 +27,7 @@ export async function prepareImage(uri: string, leadId?: string, cropRegion?: Im
     }
   );
 
-  const cacheFileName = leadId ? `lead-${leadId}.jpg` : `image-${createUuid()}.jpg`;
+  const cacheFileName = leadId ? `lead-${leadId}.jpg` : `image-${Date.now()}-${Math.round(Math.random() * 1e9)}.jpg`;
   const cachePath = `${cacheDirectory}${cacheFileName}`;
 
   await FileSystem.copyAsync({

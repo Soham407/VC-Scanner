@@ -17,8 +17,6 @@ const { anonKey: supabaseAnonKey, url: supabaseUrl } = resolveSupabaseConfig({
   ]
 });
 
-export { getRequiredConfigValue } from './supabaseConfig';
-
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     autoRefreshToken: true,

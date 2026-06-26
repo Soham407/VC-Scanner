@@ -120,27 +120,9 @@ type RootErrorBoundaryState = {
 const REVIEW_SAVE_TIMEOUT_MS = 20000;
 const CAPTURE_PROCESSING_TIMEOUT_MS = 12000;
 const CAPTURE_CLOUD_STEP_TIMEOUT_MS = 20000;
-const SCAN_PERF_TAG = '[SCAN-PERF]';
 const CAMERA_GUIDE_TOP_OFFSET = 96;
 const CAMERA_GUIDE_BOTTOM_OFFSET = 154;
 const CAMERA_CAPTURE_MARGIN = 32;
-
-function nowMs(): number {
-  return typeof globalThis.performance?.now === 'function'
-    ? globalThis.performance.now()
-    : Date.now();
-}
-
-function formatDurationMs(startedAt: number): string {
-  return `${Math.round(nowMs() - startedAt)}ms`;
-}
-
-function logScanPerf(event: string, startedAt: number, details?: Record<string, unknown>): void {
-  console.info(SCAN_PERF_TAG, event, {
-    duration: formatDurationMs(startedAt),
-    ...details
-  });
-}
 
 type CaptureProcessingState = {
   message: string;
@@ -3244,7 +3226,6 @@ function ScannerApp({
 
     captureLockRef.current = true;
     setIsCapturing(true);
-    const captureStartedAt = nowMs();
 
     try {
       const capturedPhoto = await camera?.takePictureAsync({
@@ -3252,16 +3233,8 @@ function ScannerApp({
         skipProcessing: true
       });
       pendingCaptureCropRef.current = createCropRegionForFrame(capturedPhoto?.width, capturedPhoto?.height, captureFrame);
-      logScanPerf('camera.takePictureAsync', captureStartedAt, {
-        hasCaptureFrame: Boolean(captureFrame),
-        height: capturedPhoto?.height ?? null,
-        width: capturedPhoto?.width ?? null
-      });
 
       return capturedPhoto?.uri ?? null;
-    } catch (error) {
-      logScanPerf('camera.takePictureAsync.failed', captureStartedAt);
-      throw error;
     } finally {
       captureLockRef.current = false;
       setIsCapturing(false);
@@ -3273,7 +3246,6 @@ function ScannerApp({
     captureGenerationRef.current = captureGeneration;
     setPreviewUri(uri);
     startCaptureProcessing('Preparing scan');
-    const captureStartedAt = nowMs();
 
     void (async () => {
       const localCleanupPaths = new Set<string>();
@@ -3289,47 +3261,30 @@ function ScannerApp({
       try {
         const cropRegion = pendingCaptureCropRef.current;
         pendingCaptureCropRef.current = null;
-        const prepareStartedAt = nowMs();
         const preparedImage = await prepareImage(uri, imageLeadId, cropRegion);
-        logScanPerf('capture.prepareImage', prepareStartedAt, {
-          captureGeneration,
-          hasCropRegion: Boolean(cropRegion),
-          mode: selectedMode,
-          side
-        });
         cachePath = preparedImage.cachePath;
         localCleanupPaths.add(cachePath);
 
         if (captureGenerationRef.current !== captureGeneration) {
-          logScanPerf('capture.cancelled.afterPrepareImage', captureStartedAt, { captureGeneration });
           return;
         }
 
         setCaptureProcessing((current) => current ? { ...current, message: 'Reading card text' } : current);
-        const ocrStartedAt = nowMs();
         rawText = await extractText(cachePath);
-        logScanPerf('capture.extractText', ocrStartedAt, {
-          captureGeneration,
-          rawTextLength: rawText.length
-        });
 
         if (captureGenerationRef.current !== captureGeneration) {
-          logScanPerf('capture.cancelled.afterExtractText', captureStartedAt, { captureGeneration });
           return;
         }
 
         setCaptureProcessing((current) => current ? { ...current, message: 'Saving image to cloud' } : current);
-        const uploadStartedAt = nowMs();
         const storagePath = await withTimeout(
           uploadCardImage(cachePath, imageLeadId),
           CAPTURE_CLOUD_STEP_TIMEOUT_MS,
           'Uploading scanned card timed out.'
         );
-        logScanPerf('capture.uploadCardImage', uploadStartedAt, { captureGeneration });
         remoteCleanupPaths.add(storagePath);
 
         if (captureGenerationRef.current !== captureGeneration) {
-          logScanPerf('capture.cancelled.afterUpload', captureStartedAt, { captureGeneration });
           return;
         }
 
@@ -3349,7 +3304,6 @@ function ScannerApp({
           localCleanupPaths.delete(cachePath);
           remoteCleanupPaths.delete(storagePath);
           setPreviewUri(null);
-          logScanPerf('capture.frontSideReady', captureStartedAt, { captureGeneration });
           return;
         }
 
@@ -3382,7 +3336,6 @@ function ScannerApp({
         storagePaths.forEach((path) => remoteCleanupPaths.delete(path));
 
         setCaptureProcessing((current) => current ? { ...current, message: 'Parsing card details' } : current);
-        const parseStartedAt = nowMs();
         const parsedPreview = await withTimeout(
           parseCardPreview({
             imagePath: storagePaths[0],
@@ -3394,14 +3347,8 @@ function ScannerApp({
           CAPTURE_CLOUD_STEP_TIMEOUT_MS,
           'Parsing scanned card timed out.'
         );
-        logScanPerf('capture.parseCardPreview', parseStartedAt, {
-          captureGeneration,
-          imageCount: storagePaths.length,
-          rawTextLength: rawTextForReview.length
-        });
 
         if (captureGenerationRef.current !== captureGeneration) {
-          logScanPerf('capture.cancelled.afterParse', captureStartedAt, { captureGeneration });
           return;
         }
 
@@ -3419,19 +3366,7 @@ function ScannerApp({
         });
         setPendingFrontSide(null);
         setIsCameraOpen(false);
-        logScanPerf('capture.readyForReview', captureStartedAt, {
-          captureGeneration,
-          imageCount: storagePaths.length,
-          mode: selectedMode,
-          parseStatus: parsedPreview.parseStatus
-        });
       } catch (error) {
-        logScanPerf('capture.failed', captureStartedAt, {
-          captureGeneration,
-          error: error instanceof Error ? error.name : 'UnknownError',
-          mode: selectedMode,
-          side
-        });
         if (captureGenerationRef.current !== captureGeneration) {
           return;
         }

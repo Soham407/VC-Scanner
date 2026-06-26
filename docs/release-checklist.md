@@ -26,6 +26,7 @@
 - Deploy all Supabase migrations
 - Deploy `scan-card` edge function
 - Set `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `GROQ_API_KEY` for the function runtime
+- Set `GEMINI_API_KEY` for the function runtime (primary card parser; Groq is the fallback if it is unset or fails)
 - Verify storage bucket `card-images` and RLS policies exist in the production project
 - Run one full scan flow against production-equivalent infrastructure
 
