@@ -4,7 +4,10 @@ on:
   schedule:
     # Daily at 00:00 UTC
     - cron: "0 0 * * *"
-  workflow_dispatch: 
+  workflow_dispatch:
+
+permissions:
+  contents: write   # for the monthly activity commit below
 
 jobs:
   ping-database:
@@ -15,3 +18,18 @@ jobs:
           curl -sS --fail-with-body -X GET "${{ secrets.SUPABASE_URL }}/rest/v1/scanned_leads?select=id&limit=1" \
           -H "apikey: ${{ secrets.SUPABASE_ANON_KEY }}" \
           -H "Authorization: Bearer ${{ secrets.SUPABASE_ANON_KEY }}"
+
+      # GitHub disables scheduled workflows after 60 days with no repo
+      # activity, which would silently kill this cron. Commit on the 1st.
+      - uses: actions/checkout@v5
+        if: github.event_name == 'schedule'
+      - name: Refresh repo activity (monthly)
+        if: github.event_name == 'schedule'
+        run: |
+          [ "$(date -u +%d)" = "01" ] || exit 0
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          date -u > .github/.keep-alive-stamp
+          git add .github/.keep-alive-stamp
+          git commit -m "chore: refresh repo activity for scheduled workflows"
+          git push
