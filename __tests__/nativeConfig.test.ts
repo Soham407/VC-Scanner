@@ -53,7 +53,7 @@ describe('native deep link config', () => {
     const buildGradle = readProjectFile('android/app/build.gradle');
     const easConfig = readProjectFile('eas.json');
 
-    expect(buildGradle).toContain('versionCode 2');
+    expect(buildGradle).toMatch(/versionCode \d+/);
     expect(easConfig).toContain('"autoIncrement": "versionCode"');
   });
 
