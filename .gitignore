@@ -22,3 +22,6 @@ build/
 # Supabase local stack scratch (the .gitignore inside supabase/ also handles these)
 supabase/.branches/
 supabase/.temp/
+.vercel
+.env*
+!**/.env.example

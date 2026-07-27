@@ -1,0 +1,10 @@
+node_modules
+ios
+android
+.expo
+dist
+.git
+__tests__
+assets
+demo_images
+supabase
