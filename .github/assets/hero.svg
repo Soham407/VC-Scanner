@@ -1,0 +1,180 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="420" viewBox="0 0 1200 420" role="img" aria-labelledby="title desc">
+  <title id="title">VC Scanner - Enterprise Lead Capture &amp; AI Assignment Engine</title>
+  <desc id="desc">Expo mobile app and Vite admin console for real-time card capture, ML Kit OCR, Gemini/Groq AI parsing, and team load balancing.</desc>
+
+  <defs>
+    <linearGradient id="bg-gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#080c14"/>
+      <stop offset="50%" stop-color="#0d1424"/>
+      <stop offset="100%" stop-color="#070a10"/>
+    </linearGradient>
+
+    <linearGradient id="teal-glow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#14b8a6"/>
+      <stop offset="100%" stop-color="#38bdf8"/>
+    </linearGradient>
+
+    <linearGradient id="card-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+
+    <pattern id="grid-pattern" width="30" height="30" patternUnits="userSpaceOnUse">
+      <path d="M 30 0 L 0 0 0 30" fill="none" stroke="#1e293b" stroke-width="0.5" opacity="0.4"/>
+    </pattern>
+  </defs>
+
+  <!-- Container -->
+  <rect width="1200" height="420" rx="20" fill="url(#bg-gradient)"/>
+  <rect width="1200" height="420" rx="20" fill="url(#grid-pattern)"/>
+  <rect width="1198" height="418" x="1" y="1" rx="19" fill="none" stroke="#1e293b" stroke-width="1.5"/>
+
+  <!-- Subtle glow accents -->
+  <circle cx="150" cy="80" r="180" fill="#14b8a6" opacity="0.04" filter="blur(40px)"/>
+  <circle cx="1000" cy="300" r="200" fill="#38bdf8" opacity="0.04" filter="blur(40px)"/>
+
+  <!-- Left Content Block -->
+  <g transform="translate(56, 50)">
+    <!-- Eyebrow Badge -->
+    <g>
+      <rect width="365" height="30" rx="15" fill="#0d2729" stroke="#14b8a6" stroke-width="1" opacity="0.9"/>
+      <circle cx="18" cy="15" r="4" fill="#2dd4bf"/>
+      <text x="30" y="19" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="700" fill="#2dd4bf" letter-spacing="0.8">ENTERPRISE LEAD CAPTURE ENGINE</text>
+    </g>
+
+    <!-- Main Title -->
+    <text x="0" y="88" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="46" font-weight="800" fill="#ffffff" letter-spacing="-0.5">VC Scanner</text>
+
+    <!-- Description -->
+    <text x="0" y="125" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="16" fill="#94a3b8" width="560">
+      <tspan x="0" dy="0">Expo mobile scanner + Vite admin console for business card</tspan>
+      <tspan x="0" dy="24">capture, ML Kit OCR, Gemini/Groq AI parsing, and automated</tspan>
+      <tspan x="0" dy="24">load-balanced worker assignment.</tspan>
+    </text>
+
+    <!-- Feature Pills -->
+    <g transform="translate(0, 195)">
+      <!-- Pill 1: On-Device OCR -->
+      <rect x="0" y="0" width="135" height="32" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+      <text x="12" y="20" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="600" fill="#e2e8f0">⚡ ML Kit OCR</text>
+
+      <!-- Pill 2: AI Parsing -->
+      <rect x="145" y="0" width="155" height="32" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+      <text x="157" y="20" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="600" fill="#e2e8f0">🤖 Gemini / Groq AI</text>
+
+      <!-- Pill 3: Load Balanced -->
+      <rect x="310" y="0" width="165" height="32" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1"/>
+      <text x="322" y="20" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="600" fill="#e2e8f0">⚖️ Least-Loaded Route</text>
+    </g>
+
+    <!-- Tech Stack Indicator Row -->
+    <g transform="translate(0, 255)">
+      <text x="0" y="16" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#64748b">STACK</text>
+      <text x="60" y="16" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#38bdf8">Expo 54</text>
+      <text x="125" y="16" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#64748b">•</text>
+      <text x="140" y="16" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#38bdf8">React Native 0.81</text>
+      <text x="275" y="16" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#64748b">•</text>
+      <text x="290" y="16" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#38bdf8">Vite Admin</text>
+      <text x="380" y="16" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#64748b">•</text>
+      <text x="395" y="16" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#38bdf8">Supabase Edge</text>
+    </g>
+  </g>
+
+  <!-- Right Visual Specimen Block (Live UI Mockup & Viewfinder motif) -->
+  <g transform="translate(640, 40)">
+    <!-- Base Card / Scanner Screen Container -->
+    <rect width="500" height="340" rx="16" fill="url(#card-bg)" stroke="#334155" stroke-width="1.5"/>
+    
+    <!-- Top Mock Terminal Header -->
+    <path d="M 0 16 A 16 16 0 0 1 16 0 L 484 0 A 16 16 0 0 1 500 16 L 500 40 L 0 40 Z" fill="#0f172a"/>
+    <line x1="0" y1="40" x2="500" y2="40" stroke="#1e293b" stroke-width="1"/>
+    
+    <!-- Header Window Dots -->
+    <circle cx="20" cy="20" r="5" fill="#ef4444" opacity="0.8"/>
+    <circle cx="36" cy="20" r="5" fill="#f59e0b" opacity="0.8"/>
+    <circle cx="52" cy="20" r="5" fill="#10b981" opacity="0.8"/>
+    
+    <!-- Header Title Text -->
+    <text x="75" y="24" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#94a3b8">camera_scan :: team_inbox</text>
+    
+    <!-- Status Badge top right -->
+    <rect x="370" y="10" width="115" height="20" rx="10" fill="#064e3b" stroke="#10b981" stroke-width="1"/>
+    <text x="382" y="24" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" font-weight="700" fill="#34d399">● PARSED 99.4%</text>
+
+    <!-- Inner Viewfinder & Extracted Fields -->
+    <!-- Viewfinder Focus Frame -->
+    <g transform="translate(24, 60)">
+      <!-- Viewfinder corners motif -->
+      <path d="M 0 16 L 0 0 L 16 0" fill="none" stroke="#2dd4bf" stroke-width="3" stroke-linecap="round"/>
+      <path d="M 174 0 L 190 0 L 190 16" fill="none" stroke="#2dd4bf" stroke-width="3" stroke-linecap="round"/>
+      <path d="M 0 104 L 0 120 L 16 120" fill="none" stroke="#2dd4bf" stroke-width="3" stroke-linecap="round"/>
+      <path d="M 190 104 L 190 120 L 174 120" fill="none" stroke="#2dd4bf" stroke-width="3" stroke-linecap="round"/>
+
+      <!-- Simulated Card Frame inside viewfinder -->
+      <rect x="10" y="10" width="170" height="100" rx="6" fill="#020617" stroke="#14b8a6" stroke-width="1" stroke-dasharray="4 2"/>
+      
+      <!-- Card content preview lines -->
+      <rect x="24" y="24" width="80" height="8" rx="2" fill="#38bdf8"/>
+      <rect x="24" y="38" width="55" height="6" rx="2" fill="#64748b"/>
+      <rect x="24" y="58" width="110" height="5" rx="2" fill="#475569"/>
+      <rect x="24" y="68" width="90" height="5" rx="2" fill="#475569"/>
+      <rect x="24" y="78" width="70" height="5" rx="2" fill="#475569"/>
+      
+      <!-- OCR Scanning Beam line -->
+      <line x1="8" y1="50" x2="182" y2="50" stroke="#2dd4bf" stroke-width="2" opacity="0.8"/>
+      
+      <!-- Label under viewfinder -->
+      <text x="35" y="140" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" fill="#2dd4bf">ML Kit On-Device OCR</text>
+    </g>
+
+    <!-- Arrow Connecting to Extracted JSON Panel -->
+    <path d="M 230 120 L 250 120" stroke="#38bdf8" stroke-width="2" stroke-dasharray="3 3"/>
+    <polygon points="254,120 248,116 248,124" fill="#38bdf8"/>
+
+    <!-- Structured Data Result Box -->
+    <g transform="translate(260, 56)">
+      <rect width="216" height="260" rx="10" fill="#020617" stroke="#1e293b" stroke-width="1"/>
+      
+      <!-- Box Header -->
+      <rect width="216" height="28" rx="10" fill="#0f172a"/>
+      <path d="M 0 10 L 0 28 L 216 28 L 216 10 Z" fill="#0f172a"/>
+      <text x="12" y="18" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="700" fill="#e2e8f0">Extracted Lead Schema</text>
+
+      <!-- Fields List -->
+      <!-- Name -->
+      <text x="14" y="48" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#64748b">name:</text>
+      <text x="60" y="48" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="600" fill="#f8fafc">Alex Rivera</text>
+
+      <!-- Title -->
+      <text x="14" y="70" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#64748b">title:</text>
+      <text x="60" y="70" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" fill="#cbd5e1">VP of Engineering</text>
+
+      <!-- Company -->
+      <text x="14" y="92" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#64748b">org:</text>
+      <text x="60" y="92" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="600" fill="#38bdf8">Apex Dynamics</text>
+
+      <!-- Email -->
+      <text x="14" y="114" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#64748b">email:</text>
+      <text x="60" y="114" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="10" fill="#2dd4bf">alex@apexdyn.io</text>
+
+      <!-- Phone -->
+      <text x="14" y="136" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#64748b">phone:</text>
+      <text x="60" y="136" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="10" fill="#cbd5e1">+1 555-0192</text>
+
+      <line x1="12" y1="150" x2="204" y2="150" stroke="#1e293b" stroke-width="1"/>
+
+      <!-- Assignment Route Info -->
+      <text x="14" y="168" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#64748b">assigned_to:</text>
+      <rect x="92" y="156" width="110" height="18" rx="4" fill="#1e1b4b"/>
+      <text x="98" y="169" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" font-weight="600" fill="#818cf8">worker_2 (Least)</text>
+
+      <text x="14" y="194" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" fill="#64748b">status:</text>
+      <rect x="60" y="182" width="70" height="18" rx="4" fill="#065f46"/>
+      <text x="68" y="195" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" font-weight="700" fill="#6ee7b7">ASSIGNED</text>
+
+      <!-- Action Button inside specimen -->
+      <rect x="14" y="214" width="188" height="30" rx="6" fill="#14b8a6"/>
+      <text x="60" y="233" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="11" font-weight="700" fill="#042f2e">Approve Batch Distribution</text>
+    </g>
+  </g>
+</svg>
