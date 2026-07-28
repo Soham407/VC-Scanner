@@ -1,87 +1,195 @@
-# VC Scanner
+<p align="center">
+  <img src="./.github/assets/hero.svg" width="100%" alt="VC Scanner - Enterprise Lead Capture and AI Assignment Engine">
+</p>
 
-Expo mobile app plus a separate `admin-web` Vite app for scanning, parsing, and managing business cards with Supabase.
+<p align="center">
+  <b>High-speed mobile business card scanner + Vite admin console powered by on-device OCR, Supabase Edge Functions, AI contact parsing, and load-balanced team assignment.</b>
+</p>
 
-## Apps
+<p align="center">
+  <a href="#apps--architecture">Apps</a> •
+  <a href="#key-capabilities">Capabilities</a> •
+  <a href="#system-architecture">Architecture</a> •
+  <a href="#domain-model">Domain Model</a> •
+  <a href="#environment--configuration">Setup</a> •
+  <a href="#verification--testing">Verification</a>
+</p>
 
-- Mobile app: Expo / React Native in the repo root
-- Admin web app: Vite / React app in [`admin-web`](./admin-web)
+---
 
-## Environment
+## 📱 Apps & Architecture
 
-Root `.env`:
+`VC Scanner` is a full-stack solution built for event sales and lead capture teams. It comprises two clients backed by Supabase infrastructure:
 
-- `SUPABASE_URL`
-- `SUPABASE_ANON_KEY`
-- `EXPO_PUBLIC_SUPABASE_URL`
-- `EXPO_PUBLIC_SUPABASE_ANON_KEY`
-- `GROQ_API_KEY`
+| Component | Technology | Purpose | Location |
+| :--- | :--- | :--- | :--- |
+| **Mobile App** | Expo 54 / React Native 0.81 | On-device card capture, ML Kit OCR text extraction, offline queue, and worker lead view | Root (`./`) |
+| **Admin Web Console** | Vite / React | Team Leader dashboard for team inbox curation, member invites, and batch lead assignment | [`./admin-web`](./admin-web) |
+| **AI Parsing Runtime** | Supabase Edge Function (Deno) | Structured contact extraction using Gemini API with Groq LLM fallback & Zod validation | [`./supabase/functions/scan-card`](./supabase/functions/scan-card) |
+| **Backend & Storage** | Supabase PostgreSQL + Storage | Row Level Security (RLS), `card-images` bucket, and RPC batch distribution | Hosted Supabase |
 
-`admin-web/.env.local`:
+---
 
-- `VITE_SUPABASE_URL`
-- `VITE_SUPABASE_ANON_KEY`
-- `VITE_APP_URL`
-- `VITE_AUTH_REDIRECT_URL`
+## 🚀 Key Capabilities
 
-## Auth Setup
+- **⚡ On-Device OCR Extraction**  
+  Uses `@react-native-ml-kit/text-recognition` for real-time, low-latency text recognition directly on physical mobile devices.
+- **🤖 Dual-Engine AI Contact Structuring**  
+  Calls the `scan-card` Supabase Edge Function to extract structured contact data (`name`, `title`, `org`, `email`, `phone`, `website`, `address`, `socials`, `notes`) using Gemini API as primary and Groq LLM as fallback.
+- **📦 Offline Queue & Local Storage**  
+  Persists offline scans via Zustand and `@react-native-async-storage/async-storage`, automatically retrying once network connectivity is restored.
+- **👥 Multi-Tenant Team Workspaces**  
+  Supports team context switching via `user_team_contexts`. Team Leaders manage invites, while Workers view only their assigned leads.
+- **⚖️ Load-Balanced Batch Assignment**  
+  Team Leaders curate the **Team Inbox** and trigger batch distribution powered by custom Supabase RPC functions (`approve_team_assignment_batch`) using a least-loaded worker strategy with round-robin fallback.
+- **📋 Assignment Workflow Management**  
+  Track review status (`pending`, `needs review`, `done`) with bottom sheet interfaces (`TeamAssignmentBatchSheet`, `TeamReassignSheet`) for quick lead editing and reassignment.
 
-Configure the same Supabase project for both apps.
+---
 
-Required redirect URLs:
+## 🏗️ System Architecture
 
-- Mobile OAuth callback: `vcscanner://auth/callback`
-- Admin web production callback: `<your-admin-web-origin>/`
-- Admin web preview callback: each deployed preview origin you allow
+<p align="center">
+  <img src="./.github/assets/architecture.svg" width="100%" alt="VC Scanner Architecture and Pipeline Data Flow">
+</p>
 
-Required providers:
+```
+  [ Mobile App (Expo) ] ──(Raw OCR Text)──► [ Supabase Edge: scan-card ]
+         │                                         │
+ (Local Queue Retry)                               │ (Gemini / Groq LLM)
+         ▼                                         ▼
+  [ On-Device ML Kit ]                     [ Structured JSON ]
+                                                   │
+                                                   ▼
+  [ Admin Web (Vite) ] ◄──(Batch RPC)── [ Supabase DB & Storage ]
+```
 
-- Google OAuth if using Google sign-in
-- Email auth if using password or magic-link login flows
+---
 
-Production email delivery:
+## 📘 Domain Model
 
-- Configure real SMTP in Supabase before client rollout
-- Enable email confirmations and production email templates in the hosted project as needed
+`VC Scanner` enforces strict domain language across mobile, web, and database boundaries:
 
-## Backend Setup
+| Term | Definition | Context & Boundaries |
+| :--- | :--- | :--- |
+| **Team** | The shared event boundary where business cards are captured and stored | A user has one active team at a time; created by a Team Leader |
+| **Team Leader** | User who manages team membership, sends invites, and assigns scans | Can view full Team Inbox, edit batches, and reassign leads |
+| **Worker** | Team member who receives assigned lead scans for follow-up | Can see **only** assigned scans in their personal inbox |
+| **Team Inbox** | Unassigned card captures awaiting review and assignment | Visible to Team Leaders for batch distribution |
+| **Batch Assignment** | Manual bulk routing of captured scans to workers | Uses least-loaded worker routing with round-robin fallback |
+| **Pending Invite** | Team invitation sent to an email address | Requires accept/decline dialog; becomes a Membership when accepted |
+| **Assignment State** | Review state of a worker lead assignment | `pending` ➔ `needs review` ➔ `done` |
 
-Deploy the Supabase Edge Function:
+---
 
-- `scan-card`
+## 🛠️ Environment & Configuration
 
-Required function secrets:
+### 1. Environment Files
 
-- `SUPABASE_URL`
-- `SUPABASE_ANON_KEY`
-- `GROQ_API_KEY`
+#### Mobile / Root (`.env`)
+```ini
+SUPABASE_URL=https://<your-project>.supabase.co
+SUPABASE_ANON_KEY=<your-anon-key>
+EXPO_PUBLIC_SUPABASE_URL=https://<your-project>.supabase.co
+EXPO_PUBLIC_SUPABASE_ANON_KEY=<your-anon-key>
+GROQ_API_KEY=<your-groq-api-key>
+```
 
-## Mobile Release
+#### Admin Web (`admin-web/.env.local`)
+```ini
+VITE_SUPABASE_URL=https://<your-project>.supabase.co
+VITE_SUPABASE_ANON_KEY=<your-anon-key>
+VITE_APP_URL=http://localhost:5173
+VITE_AUTH_REDIRECT_URL=http://localhost:5173
+```
 
-- Android application ID: `com.vsscanner.app`
-- iOS bundle identifier: `com.vsscanner.app`
-- Expo scheme: `vcscanner`
+#### Edge Function Runtime Secrets
+Set secrets for the hosted Supabase project:
+```bash
+supabase secrets set SUPABASE_URL=https://<your-project>.supabase.co \
+  SUPABASE_ANON_KEY=<your-anon-key> \
+  GEMINI_API_KEY=<your-gemini-api-key> \
+  GROQ_API_KEY=<your-groq-api-key>
+```
 
-Before store submission, configure:
+---
 
-- EAS project secrets for Android signing
-- Apple signing and App Store Connect credentials
-- Real production Supabase project values
+### 2. Auth & Deep Link Setup
 
-## Verification
+Configure the Supabase Auth project redirect allowlist for both mobile and web:
 
-Root app:
+- **Mobile OAuth Callback Scheme**: `vcscanner://auth/callback`
+- **Admin Web Callback**: `<your-admin-web-origin>/` (and preview URLs)
+- **Supported Auth Providers**: Google OAuth and Email Auth (Password / Magic Link)
 
-- `npm run typecheck`
-- `npm test`
-- `npm run test:supabase-functions`
-- `npm run web:build`
+> [!IMPORTANT]
+> Configure real SMTP credentials and production email templates in Supabase before deploying client releases.
 
-Admin web:
+---
 
-- `cd admin-web && npm run test`
-- `cd admin-web && npm run build`
+### 3. Mobile Release Metadata
 
-## Release Checklist
+- **Android Application ID**: `com.vsscanner.app`
+- **iOS Bundle Identifier**: `com.vsscanner.app`
+- **Expo Scheme**: `vcscanner`
 
-See [`docs/release-checklist.md`](./docs/release-checklist.md).
+---
+
+## 🧪 Verification & Testing
+
+Run verification commands across client and backend workspaces:
+
+### Root & Mobile App
+```bash
+# Typecheck TypeScript sources
+npm run typecheck
+
+# Run Jest unit and component tests
+npm test
+
+# Test Supabase Edge Functions with Deno
+npm run test:supabase-functions
+
+# Verify Expo Web bundle build
+npm run web:build
+```
+
+### Admin Web App
+```bash
+cd admin-web
+
+# Run Admin Web unit tests
+npm run test
+
+# Production build verification
+npm run build
+```
+
+---
+
+## 📁 Repository Structure
+
+```
+VC-Scanner/
+├── App.tsx                       # Main Expo Mobile entrypoint & bottom sheet orchestration
+├── src/                          # Mobile components, screens, hooks, & stores
+│   ├── components/               # UI components (MetricRail, TeamAssignmentBatchSheet, etc.)
+│   ├── hooks/                    # Custom hooks (useTeamWorkspace, etc.)
+│   └── services/                 # OCR, camera, & API integration services
+├── admin-web/                    # Vite / React Admin Console
+│   ├── src/                      # Admin web components, pages, & Supabase client
+│   └── package.json              # Admin web scripts & dependencies
+├── supabase/                     # Backend infrastructure
+│   ├── functions/scan-card/      # Deno Edge Function for AI contact parsing (Gemini/Groq)
+│   └── migrations/               # PostgreSQL schema & RPC function migrations
+├── docs/                         # Documentation & release procedures
+│   ├── release-checklist.md      # Step-by-step production release checklist
+│   └── adr/                      # Architectural Decision Records
+└── .github/assets/               # GitHub README visual assets (hero & architecture SVG)
+```
+
+---
+
+## 📋 Release Checklist
+
+Before submitting builds to Apple App Store Connect or Google Play Console, follow the instructions in [`docs/release-checklist.md`](./docs/release-checklist.md).

@@ -1,0 +1,157 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="400" viewBox="0 0 1200 400" role="img" aria-labelledby="arch-title arch-desc">
+  <title id="arch-title">VC Scanner Pipeline Architecture &amp; Data Flow</title>
+  <desc id="arch-desc">4-stage architecture showing Expo mobile camera capture, ML Kit local OCR, Supabase Edge Function AI parsing with Gemini and Groq, Supabase DB storage, and Vite Admin load-balanced team assignment.</desc>
+
+  <defs>
+    <linearGradient id="arch-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#080c14"/>
+      <stop offset="100%" stop-color="#0d1526"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Container -->
+  <rect width="1200" height="400" rx="16" fill="url(#arch-bg)"/>
+  <rect width="1198" height="398" x="1" y="1" rx="15" fill="none" stroke="#1e293b" stroke-width="1.5"/>
+
+  <!-- Diagram Title Header -->
+  <g transform="translate(40, 30)">
+    <text x="0" y="20" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="20" font-weight="700" fill="#f8fafc">System Architecture &amp; End-to-End Pipeline</text>
+    <text x="0" y="42" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="13" fill="#94a3b8">From business card image capture to AI schema parsing, secure persistence, and round-robin worker routing.</text>
+  </g>
+
+  <!-- 4 Stage Blocks -->
+
+  <!-- STAGE 1: Mobile Capture & Local OCR -->
+  <g transform="translate(40, 95)">
+    <rect width="250" height="265" rx="12" fill="#0f172a" stroke="#334155" stroke-width="1.5"/>
+    <!-- Stage Header -->
+    <rect width="250" height="36" rx="12" fill="#1e293b"/>
+    <path d="M 0 16 L 0 36 L 250 36 L 250 16 Z" fill="#1e293b"/>
+    <text x="14" y="23" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="700" fill="#38bdf8">1. CAPTURE &amp; LOCAL OCR</text>
+
+    <!-- Details -->
+    <g transform="translate(16, 52)">
+      <rect width="218" height="44" rx="6" fill="#020617" stroke="#1e293b" stroke-width="1"/>
+      <text x="10" y="18" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="700" fill="#e2e8f0">Expo Camera &amp; Picker</text>
+      <text x="10" y="34" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="10" fill="#94a3b8">Live view &amp; image manipulation</text>
+
+      <rect y="54" width="218" height="44" rx="6" fill="#020617" stroke="#1e293b" stroke-width="1"/>
+      <text x="10" y="72" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="700" fill="#2dd4bf">ML Kit Text Recognition</text>
+      <text x="10" y="88" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="10" fill="#94a3b8">Fast on-device raw text extraction</text>
+
+      <rect y="108" width="218" height="44" rx="6" fill="#020617" stroke="#1e293b" stroke-width="1"/>
+      <text x="10" y="126" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="700" fill="#e2e8f0">Offline Queue Fallback</text>
+      <text x="10" y="142" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="10" fill="#94a3b8">Zustand &amp; Async Storage retry</text>
+
+      <!-- Badge -->
+      <rect y="162" width="218" height="24" rx="4" fill="#0c4a6e"/>
+      <text x="50" y="178" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" font-weight="600" fill="#7dd3fc">CLIENT: iOS &amp; Android</text>
+    </g>
+  </g>
+
+  <!-- Arrow 1 -> 2 -->
+  <g transform="translate(294, 215)">
+    <line x1="0" y1="0" x2="30" y2="0" stroke="#38bdf8" stroke-width="2" stroke-dasharray="4 2"/>
+    <polygon points="36,0 28,-5 28,5" fill="#38bdf8"/>
+    <text x="-5" y="-10" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="9" fill="#64748b">Raw OCR</text>
+  </g>
+
+  <!-- STAGE 2: AI Parsing Edge Function -->
+  <g transform="translate(334, 95)">
+    <rect width="250" height="265" rx="12" fill="#0f172a" stroke="#14b8a6" stroke-width="1.5"/>
+    <!-- Stage Header -->
+    <rect width="250" height="36" rx="12" fill="#0d2729"/>
+    <path d="M 0 16 L 0 36 L 250 36 L 250 16 Z" fill="#0d2729"/>
+    <text x="14" y="23" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="700" fill="#2dd4bf">2. AI STRUCTURING ENGINE</text>
+
+    <!-- Details -->
+    <g transform="translate(16, 52)">
+      <rect width="218" height="44" rx="6" fill="#020617" stroke="#14b8a6" stroke-width="1"/>
+      <text x="10" y="18" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="700" fill="#2dd4bf">scan-card Edge Function</text>
+      <text x="10" y="34" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="10" fill="#94a3b8">Deno runtime on Supabase</text>
+
+      <rect y="54" width="218" height="44" rx="6" fill="#020617" stroke="#1e293b" stroke-width="1"/>
+      <text x="10" y="72" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="700" fill="#f59e0b">Primary: Gemini API</text>
+      <text x="10" y="88" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="10" fill="#94a3b8">Fallback: Groq LLM runtime</text>
+
+      <rect y="108" width="218" height="44" rx="6" fill="#020617" stroke="#1e293b" stroke-width="1"/>
+      <text x="10" y="126" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="700" fill="#e2e8f0">Zod Schema Validation</text>
+      <text x="10" y="142" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="10" fill="#94a3b8">Strict contact field enforcement</text>
+
+      <!-- Badge -->
+      <rect y="162" width="218" height="24" rx="4" fill="#064e3b"/>
+      <text x="40" y="178" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" font-weight="600" fill="#34d399">RUNTIME: Supabase Edge</text>
+    </g>
+  </g>
+
+  <!-- Arrow 2 -> 3 -->
+  <g transform="translate(588, 215)">
+    <line x1="0" y1="0" x2="30" y2="0" stroke="#2dd4bf" stroke-width="2" stroke-dasharray="4 2"/>
+    <polygon points="36,0 28,-5 28,5" fill="#2dd4bf"/>
+    <text x="-5" y="-10" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="9" fill="#64748b">JSON Payload</text>
+  </g>
+
+  <!-- STAGE 3: Durable Persistence & RLS -->
+  <g transform="translate(628, 95)">
+    <rect width="250" height="265" rx="12" fill="#0f172a" stroke="#334155" stroke-width="1.5"/>
+    <!-- Stage Header -->
+    <rect width="250" height="36" rx="12" fill="#1e293b"/>
+    <path d="M 0 16 L 0 36 L 250 36 L 250 16 Z" fill="#1e293b"/>
+    <text x="14" y="23" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="700" fill="#818cf8">3. PERSISTENCE &amp; RLS</text>
+
+    <!-- Details -->
+    <g transform="translate(16, 52)">
+      <rect width="218" height="44" rx="6" fill="#020617" stroke="#1e293b" stroke-width="1"/>
+      <text x="10" y="18" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="700" fill="#e2e8f0">PostgreSQL DB &amp; Auth</text>
+      <text x="10" y="34" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="10" fill="#94a3b8">Row Level Security policies</text>
+
+      <rect y="54" width="218" height="44" rx="6" fill="#020617" stroke="#1e293b" stroke-width="1"/>
+      <text x="10" y="72" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="700" fill="#e2e8f0">card-images Bucket</text>
+      <text x="10" y="88" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="10" fill="#94a3b8">Secure business card storage</text>
+
+      <rect y="108" width="218" height="44" rx="6" fill="#020617" stroke="#1e293b" stroke-width="1"/>
+      <text x="10" y="126" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="700" fill="#818cf8">Team Workspace Context</text>
+      <text x="10" y="142" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="10" fill="#94a3b8">Active team switching &amp; scope</text>
+
+      <!-- Badge -->
+      <rect y="162" width="218" height="24" rx="4" fill="#1e1b4b"/>
+      <text x="35" y="178" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" font-weight="600" fill="#a5b4fc">BACKEND: Supabase Cloud</text>
+    </g>
+  </g>
+
+  <!-- Arrow 3 -> 4 -->
+  <g transform="translate(882, 215)">
+    <line x1="0" y1="0" x2="30" y2="0" stroke="#818cf8" stroke-width="2" stroke-dasharray="4 2"/>
+    <polygon points="36,0 28,-5 28,5" fill="#818cf8"/>
+    <text x="-5" y="-10" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="9" fill="#64748b">Team Inbox</text>
+  </g>
+
+  <!-- STAGE 4: Admin Web & Load-Balanced Distribution -->
+  <g transform="translate(922, 95)">
+    <rect width="238" height="265" rx="12" fill="#0f172a" stroke="#334155" stroke-width="1.5"/>
+    <!-- Stage Header -->
+    <rect width="238" height="36" rx="12" fill="#1e293b"/>
+    <path d="M 0 16 L 0 36 L 238 36 L 238 16 Z" fill="#1e293b"/>
+    <text x="12" y="23" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="12" font-weight="700" fill="#f43f5e">4. ADMIN ROUTING</text>
+
+    <!-- Details -->
+    <g transform="translate(12, 52)">
+      <rect width="214" height="44" rx="6" fill="#020617" stroke="#1e293b" stroke-width="1"/>
+      <text x="10" y="18" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="700" fill="#e2e8f0">Vite Admin Console</text>
+      <text x="10" y="34" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="10" fill="#94a3b8">Team Leader inbox &amp; member mgmt</text>
+
+      <rect y="54" width="214" height="44" rx="6" fill="#020617" stroke="#1e293b" stroke-width="1"/>
+      <text x="10" y="72" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="700" fill="#f43f5e">Least-Loaded RPC</text>
+      <text x="10" y="88" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="10" fill="#94a3b8">Round-robin worker batch distribution</text>
+
+      <rect y="108" width="214" height="44" rx="6" fill="#020617" stroke="#1e293b" stroke-width="1"/>
+      <text x="10" y="126" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11" font-weight="700" fill="#e2e8f0">Worker Assignment</text>
+      <text x="10" y="142" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif" font-size="10" fill="#94a3b8">Status: done / needs review</text>
+
+      <!-- Badge -->
+      <rect y="162" width="214" height="24" rx="4" fill="#881337"/>
+      <text x="35" y="178" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10" font-weight="600" fill="#fca5a5">CONSOLE: Vite / React</text>
+    </g>
+  </g>
+
+</svg>
