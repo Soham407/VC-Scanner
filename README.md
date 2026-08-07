@@ -9,6 +9,7 @@
 <p align="center">
   <a href="#apps--architecture">Apps</a> •
   <a href="#key-capabilities">Capabilities</a> •
+  <a href="#user-flows">User Flows</a> •
   <a href="#system-architecture">Architecture</a> •
   <a href="#domain-model">Domain Model</a> •
   <a href="#environment--configuration">Setup</a> •
@@ -44,6 +45,16 @@
   Team Leaders curate the **Team Inbox** and trigger batch distribution powered by custom Supabase RPC functions (`approve_team_assignment_batch`) using a least-loaded worker strategy with round-robin fallback.
 - **📋 Assignment Workflow Management**  
   Track review status (`pending`, `needs review`, `done`) with bottom sheet interfaces (`TeamAssignmentBatchSheet`, `TeamReassignSheet`) for quick lead editing and reassignment.
+
+---
+
+## 🗺️ User Flows
+
+What each role sees across both clients, and how a card moves from capture to follow-up:
+
+<p align="center">
+  <img src="./vc-scanner-user-flows.png" width="100%" alt="VC Scanner user flows: what Team Leaders and Workers see in the phone app and web dashboard, and how cards move from capture through assignment, follow-up, and team invites">
+</p>
 
 ---
 
