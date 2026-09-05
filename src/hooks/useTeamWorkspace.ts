@@ -37,6 +37,9 @@ export type TeamWorkspaceState = {
   historyTeamName: string | null;
   historyItems: TeamInboxItem[];
   historyMode: TeamInboxReview['mode'];
+  hasMoreHistory: boolean;
+  loadMoreHistory: () => void;
+  isLoadingMoreHistory: boolean;
   members: TeamMember[];
   isBatchActionLoading: boolean;
   isAssignmentReassignmentLoading: boolean;
@@ -122,6 +125,9 @@ export function useTeamWorkspace(session: Session | null | undefined): TeamWorks
   const [isInviteGateReady, setIsInviteGateReady] = useState(false);
   const [isInviteDecisionSubmitting, setIsInviteDecisionSubmitting] = useState(false);
   const [members, setMembers] = useState<TeamMember[]>([]);
+  const [hasMoreHistory, setHasMoreHistory] = useState(false);
+  const [historyPage, setHistoryPage] = useState(0);
+  const [isLoadingMoreHistory, setIsLoadingMoreHistory] = useState(false);
 
   const workerMembers = useMemo(() => members.filter((member) => !member.isLeader), [members]);
 
@@ -151,27 +157,55 @@ export function useTeamWorkspace(session: Session | null | undefined): TeamWorks
       setHistoryTeamName(null);
       setHistoryItems([]);
       setHistoryTeamId(null);
+      setHasMoreHistory(false);
+      setHistoryPage(0);
       return;
     }
 
     setIsHistoryLoading(true);
 
     try {
-      const result = await loadTeamInboxReview(session.user.id);
+      const result = await loadTeamInboxReview(session.user.id, 0);
       setHistoryMode(result.mode);
       setHistoryTeamName(result.teamName);
       setHistoryItems(result.items);
       setHistoryTeamId(result.teamId);
+      setHasMoreHistory(result.hasMore);
+      setHistoryPage(0);
     } catch (error) {
       setHistoryMode('worker-history');
       setHistoryTeamName(null);
       setHistoryItems([]);
       setHistoryTeamId(null);
+      setHasMoreHistory(false);
+      setHistoryPage(0);
       console.warn('Team inbox review fetch failed', error);
     } finally {
       setIsHistoryLoading(false);
     }
   }, [session?.user.id]);
+
+  const loadMoreHistory = useCallback(() => {
+    if (!session?.user.id || !hasMoreHistory || isLoadingMoreHistory) {
+      return;
+    }
+
+    const nextPage = historyPage + 1;
+    setIsLoadingMoreHistory(true);
+
+    void (async () => {
+      try {
+        const result = await loadTeamInboxReview(session.user.id, nextPage);
+        setHistoryItems((current) => [...current, ...result.items]);
+        setHasMoreHistory(result.hasMore);
+        setHistoryPage(nextPage);
+      } catch (error) {
+        console.warn('Load more history failed', error);
+      } finally {
+        setIsLoadingMoreHistory(false);
+      }
+    })();
+  }, [session?.user.id, hasMoreHistory, historyPage, isLoadingMoreHistory]);
 
   const refreshMembers = useCallback(async (teamId?: string): Promise<void> => {
     const effectiveTeamId = teamId ?? team?.id;
@@ -578,6 +612,9 @@ export function useTeamWorkspace(session: Session | null | undefined): TeamWorks
     historyTeamName,
     historyItems,
     historyMode,
+    hasMoreHistory,
+    loadMoreHistory,
+    isLoadingMoreHistory,
     members,
     isBatchActionLoading,
     isAssignmentReassignmentLoading,

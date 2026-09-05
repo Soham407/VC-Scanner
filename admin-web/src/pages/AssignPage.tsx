@@ -5,7 +5,7 @@ import {
   approveBatch,
   createAssignmentBatch,
   loadPendingAssignmentBatch,
-  loadTeamLeads,
+  loadAllTeamLeads,
   loadTeamMembers,
   reassignLead,
   removeBatchItem
@@ -65,7 +65,7 @@ export function AssignPage({ teamId }: { teamId: string }) {
   async function refresh() {
     const [batchData, leadData, memberData] = await Promise.all([
       loadPendingAssignmentBatch(teamId),
-      loadTeamLeads(teamId),
+      loadAllTeamLeads(teamId),
       loadTeamMembers(teamId)
     ]);
     setBatch(batchData);

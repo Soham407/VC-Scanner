@@ -1,4 +1,5 @@
 import { loadTeamInboxReview } from '../../src/lib/teamInbox';
+import { TEAM_REVIEW_PAGE_SIZE } from '../../src/lib/teamReview';
 import { supabase } from '../../src/lib/supabase';
 
 jest.mock('../../src/lib/supabase', () => ({
@@ -18,11 +19,13 @@ describe('teamInbox', () => {
       is: jest.Mock;
       maybeSingle: jest.Mock;
       order: jest.Mock;
+      range: jest.Mock;
     } = {
       eq: jest.fn(() => chain),
       is: jest.fn(() => chain),
       maybeSingle: jest.fn().mockResolvedValue(result),
-      order: jest.fn().mockResolvedValue(result)
+      order: jest.fn(() => chain),
+      range: jest.fn().mockResolvedValue(result)
     };
 
     return chain;
@@ -155,7 +158,8 @@ describe('teamInbox', () => {
           rawText: 'Grace'
         }
       ],
-      mode: 'leader-inbox'
+      mode: 'leader-inbox',
+      hasMore: false
     });
   });
 
@@ -257,7 +261,8 @@ describe('teamInbox', () => {
           rawText: 'Ada'
         }
       ],
-      mode: 'leader-inbox'
+      mode: 'leader-inbox',
+      hasMore: false
     });
   });
 
@@ -359,7 +364,8 @@ describe('teamInbox', () => {
           rawText: 'Worker'
         }
       ],
-      mode: 'worker-history'
+      mode: 'worker-history',
+      hasMore: false
     });
   });
 
@@ -441,7 +447,155 @@ describe('teamInbox', () => {
           rawText: 'Solo User'
         }
       ],
-      mode: 'worker-history'
+      mode: 'worker-history',
+      hasMore: false
     });
+  });
+
+  it('returns hasMore true when result count equals page size', async () => {
+
+    const activeTeamQuery = createQueryChain({
+      data: { team_id: 'team-1' },
+      error: null
+    });
+
+    const teamQuery = createQueryChain({
+      data: {
+        created_by: 'leader-1',
+        id: 'team-1',
+        name: 'North Hall'
+      },
+      error: null
+    });
+
+    const leaderQuery = createQueryChain({
+      data: null,
+      error: null
+    });
+
+    const fullPage = Array.from({ length: TEAM_REVIEW_PAGE_SIZE }, (_, i) => ({
+      id: `lead-${i}`,
+      team_id: 'team-1',
+      user_id: 'leader-1',
+      full_name: `Lead ${i}`,
+      job_title: null,
+      company_name: null,
+      product_services: null,
+      email: null,
+      phone_number: null,
+      address: null,
+      image_url: null,
+      raw_ocr_text: `Lead ${i}`,
+      parse_status: 'parsed' as const,
+      created_at: `2026-05-01T${String(i).padStart(2, '0')}:00:00Z`
+    }));
+
+    const inboxQuery = createQueryChain({
+      data: fullPage,
+      error: null
+    });
+
+    (supabase.from as jest.Mock).mockImplementation((table: string) => {
+      if (table === 'team_memberships') {
+        return { select: jest.fn().mockReturnValue(activeTeamQuery) };
+      }
+      if (table === 'teams') {
+        return { select: jest.fn().mockReturnValue(teamQuery) };
+      }
+      if (table === 'team_leaders') {
+        return { select: jest.fn().mockReturnValue(leaderQuery) };
+      }
+      if (table === 'scanned_leads') {
+        return { select: jest.fn().mockReturnValue(inboxQuery) };
+      }
+      throw new Error(`Unexpected table: ${table}`);
+    });
+
+    const result = await loadTeamInboxReview('leader-1');
+    expect(result.hasMore).toBe(true);
+    expect(result.items).toHaveLength(TEAM_REVIEW_PAGE_SIZE);
+  });
+
+  it('pagination does not drop rows and load-more appends', async () => {
+
+    const activeTeamQuery = createQueryChain({
+      data: null,
+      error: null
+    });
+
+    const page0Data = Array.from({ length: TEAM_REVIEW_PAGE_SIZE }, (_, i) => ({
+      id: `lead-p0-${i}`,
+      team_id: null,
+      user_id: 'user-1',
+      full_name: `Page0 Lead ${i}`,
+      job_title: null,
+      company_name: null,
+      product_services: null,
+      email: null,
+      phone_number: null,
+      address: null,
+      image_url: null,
+      raw_ocr_text: `p0-${i}`,
+      parse_status: 'parsed' as const,
+      created_at: `2026-05-01T00:${String(i).padStart(2, '0')}:00Z`
+    }));
+
+    const page1Data = [
+      {
+        id: 'lead-p1-0',
+        team_id: null,
+        user_id: 'user-1',
+        full_name: 'Page1 Lead 0',
+        job_title: null,
+        company_name: null,
+        product_services: null,
+        email: null,
+        phone_number: null,
+        address: null,
+        image_url: null,
+        raw_ocr_text: 'p1-0',
+        parse_status: 'parsed' as const,
+        created_at: '2026-05-02T00:00:00Z'
+      }
+    ];
+
+    let callCount = 0;
+    const page0Query = createQueryChain({ data: page0Data, error: null });
+    const page1Query = createQueryChain({ data: page1Data, error: null });
+
+    (supabase.from as jest.Mock).mockImplementation((table: string) => {
+      if (table === 'team_memberships') {
+        return { select: jest.fn().mockReturnValue(activeTeamQuery) };
+      }
+      if (table === 'scanned_leads') {
+        callCount++;
+        return {
+          select: jest.fn().mockReturnValue(callCount === 1 ? page0Query : page1Query)
+        };
+      }
+      throw new Error(`Unexpected table: ${table}`);
+    });
+
+    const result0 = await loadTeamInboxReview('user-1', 0);
+    expect(result0.hasMore).toBe(true);
+    expect(result0.items).toHaveLength(TEAM_REVIEW_PAGE_SIZE);
+
+    const result1 = await loadTeamInboxReview('user-1', 1);
+    expect(result1.hasMore).toBe(false);
+    expect(result1.items).toHaveLength(1);
+
+    // Simulate load-more appending
+    const combined = [...result0.items, ...result1.items];
+    expect(combined).toHaveLength(TEAM_REVIEW_PAGE_SIZE + 1);
+
+    // Verify no duplicates
+    const ids = combined.map((item) => item.id);
+    expect(new Set(ids).size).toBe(ids.length);
+
+    // Verify no dropped items
+    for (let i = 0; i < TEAM_REVIEW_PAGE_SIZE; i++) {
+      expect(ids).toContain(`lead-p0-${i}`);
+    }
+    expect(ids).toContain('lead-p1-0');
   });
 });

@@ -934,6 +934,9 @@ function HistoryScreen({
   isPersonalHistory,
   items,
   mode,
+  hasMore,
+  onLoadMore,
+  isLoadingMore,
   onApproveBatch,
   onEditBatch,
   onCreateBatch,
@@ -952,6 +955,9 @@ function HistoryScreen({
   isPersonalHistory: boolean;
   items: TeamInboxItem[];
   mode: HistoryMode;
+  hasMore: boolean;
+  onLoadMore: () => void;
+  isLoadingMore: boolean;
   onApproveBatch: () => void;
   onEditBatch: () => void;
   onCreateBatch: () => void;
@@ -1195,6 +1201,19 @@ function HistoryScreen({
               </Animated.View>
             </Animated.View>
           ))}
+          {hasMore ? (
+            <View style={{ alignItems: 'center', paddingVertical: 16 }}>
+              <Button
+                disabled={isLoadingMore}
+                loading={isLoadingMore}
+                mode="outlined"
+                onPress={onLoadMore}
+                testID="load-more-history-button"
+              >
+                Load more
+              </Button>
+            </View>
+          ) : null}
         </View>
       )}
     </ScreenShell>
@@ -2958,7 +2977,10 @@ function ScannerApp({
     reassignAssignment,
     removeBatchItem,
     updateAssignmentState,
-    updateLeadDetails
+    updateLeadDetails,
+    hasMoreHistory,
+    loadMoreHistory,
+    isLoadingMoreHistory
   } = workspace;
   const captureLockRef = useRef(false);
   const captureGenerationRef = useRef(0);
@@ -3704,6 +3726,9 @@ function ScannerApp({
               isPersonalHistory={isPersonalHistory}
               items={visibleHistoryItems}
               mode={historyMode}
+              hasMore={isPersonalHistory ? false : hasMoreHistory}
+              onLoadMore={loadMoreHistory}
+              isLoadingMore={isLoadingMoreHistory}
               onApproveBatch={() => setIsBatchApprovalConfirmOpen(true)}
               onEditBatch={openBatchEditor}
               onCreateBatch={createBatch}
@@ -3822,7 +3847,10 @@ function ScannerApp({
         session.user.email,
         team,
         workerMembers,
-        canApprovePendingBatch
+        canApprovePendingBatch,
+        hasMoreHistory,
+        loadMoreHistory,
+        isLoadingMoreHistory
       ]
   );
 

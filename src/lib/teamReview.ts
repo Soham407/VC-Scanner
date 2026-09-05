@@ -1,6 +1,8 @@
 import { supabase } from './supabase';
 import type { AssignmentState } from './teamAssignments';
 
+export const TEAM_REVIEW_PAGE_SIZE = 50;
+
 export type TeamReviewItem = {
   address: string | null;
   assignedToUserId: string | null;
@@ -26,6 +28,7 @@ export type TeamReviewResult = {
   teamName: string | null;
   items: TeamReviewItem[];
   mode: 'leader-inbox' | 'worker-history';
+  hasMore: boolean;
 };
 
 type TeamMembershipRow = {
@@ -140,27 +143,36 @@ export async function updateScannedLeadDetails(
   }
 }
 
-async function loadUserHistory(userId: string): Promise<TeamReviewItem[]> {
+async function loadUserHistory(userId: string, page: number): Promise<{ items: TeamReviewItem[]; hasMore: boolean }> {
+  const from = page * TEAM_REVIEW_PAGE_SIZE;
+  const to = from + TEAM_REVIEW_PAGE_SIZE - 1;
+
   const { data, error } = await supabase
     .from('scanned_leads')
     .select(LEAD_SELECT_FIELDS)
     .eq('user_id', userId)
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false })
+    .range(from, to);
 
   if (error) {
     throw error;
   }
 
-  return ((data ?? []) as unknown as ScannedLeadRow[]).map(mapLeadRow);
+  const rows = ((data ?? []) as unknown as ScannedLeadRow[]).map(mapLeadRow);
+  return { items: rows, hasMore: rows.length === TEAM_REVIEW_PAGE_SIZE };
 }
 
-async function loadWorkerAssignedWork(userId: string, activeTeamId: string): Promise<TeamReviewItem[]> {
+async function loadWorkerAssignedWork(userId: string, activeTeamId: string, page: number): Promise<{ items: TeamReviewItem[]; hasMore: boolean }> {
+  const from = page * TEAM_REVIEW_PAGE_SIZE;
+  const to = from + TEAM_REVIEW_PAGE_SIZE - 1;
+
   const { data, error } = await supabase
     .from('lead_assignments')
     .select(`assigned_at, assignment_state, scanned_leads!inner(${LEAD_SELECT_FIELDS})`)
     .eq('assigned_to_user_id', userId)
     .eq('team_id', activeTeamId)
-    .order('assigned_at', { ascending: false });
+    .order('assigned_at', { ascending: false })
+    .range(from, to);
 
   if (error) {
     throw error;
@@ -178,7 +190,8 @@ async function loadWorkerAssignedWork(userId: string, activeTeamId: string): Pro
         : null;
     });
 
-  return rows.filter((item): item is TeamReviewItem => item !== null);
+  const items = rows.filter((item): item is TeamReviewItem => item !== null);
+  return { items, hasMore: items.length === TEAM_REVIEW_PAGE_SIZE };
 }
 
 async function loadCurrentTeamId(userId: string): Promise<string | null> {
@@ -228,18 +241,22 @@ async function isTeamLeader(team: TeamRow, userId: string): Promise<boolean> {
   return Boolean((teamLeaderData as TeamLeaderRow | null)?.user_id);
 }
 
-async function loadLeaderInbox(activeTeamId: string): Promise<TeamReviewItem[]> {
+async function loadLeaderInbox(activeTeamId: string, page: number): Promise<{ items: TeamReviewItem[]; hasMore: boolean }> {
+  const from = page * TEAM_REVIEW_PAGE_SIZE;
+  const to = from + TEAM_REVIEW_PAGE_SIZE - 1;
+
   const { data, error } = await supabase
     .from('scanned_leads')
     .select(`${LEAD_SELECT_FIELDS}, lead_assignments!left(assigned_at, assignment_state, assigned_to_user_id)`)
     .eq('team_id', activeTeamId)
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false })
+    .range(from, to);
 
   if (error) {
     throw error;
   }
 
-  return ((data ?? []) as unknown as Array<ScannedLeadRow & {
+  const items = ((data ?? []) as unknown as Array<ScannedLeadRow & {
     lead_assignments?: AssignedLeadRow | AssignedLeadRow[] | null;
   }>).map((row) => {
     const lead = mapLeadRow(row);
@@ -258,42 +275,51 @@ async function loadLeaderInbox(activeTeamId: string): Promise<TeamReviewItem[]> 
       assignmentState: assignment.assignment_state
     };
   });
+  return { items, hasMore: items.length === TEAM_REVIEW_PAGE_SIZE };
 }
 
-export async function loadTeamReview(userId: string): Promise<TeamReviewResult> {
+export async function loadTeamReview(userId: string, page: number = 0): Promise<TeamReviewResult> {
   const teamId = await loadCurrentTeamId(userId);
   if (!teamId) {
+    const result = await loadUserHistory(userId, page);
     return {
       teamId: null,
       teamName: null,
-      items: await loadUserHistory(userId),
-      mode: 'worker-history'
+      items: result.items,
+      mode: 'worker-history',
+      hasMore: result.hasMore
     };
   }
 
   const team = await loadTeam(teamId);
   if (!team) {
+    const result = await loadUserHistory(userId, page);
     return {
       teamId: null,
       teamName: null,
-      items: await loadUserHistory(userId),
-      mode: 'worker-history'
+      items: result.items,
+      mode: 'worker-history',
+      hasMore: result.hasMore
     };
   }
 
   if (!(await isTeamLeader(team, userId))) {
+    const result = await loadWorkerAssignedWork(userId, teamId, page);
     return {
       teamId,
       teamName: team.name,
-      items: await loadWorkerAssignedWork(userId, teamId),
-      mode: 'worker-history'
+      items: result.items,
+      mode: 'worker-history',
+      hasMore: result.hasMore
     };
   }
 
+  const result = await loadLeaderInbox(teamId, page);
   return {
     teamId,
     teamName: team.name,
-    items: await loadLeaderInbox(teamId),
-    mode: 'leader-inbox'
+    items: result.items,
+    mode: 'leader-inbox',
+    hasMore: result.hasMore
   };
 }

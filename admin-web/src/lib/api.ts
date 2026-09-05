@@ -52,6 +52,13 @@ const LEAD_SELECT_FIELDS = [
   'created_at'
 ].join(', ');
 
+export const LEADS_PAGE_SIZE = 50;
+
+export type PaginatedLeads = {
+  hasMore: boolean;
+  leads: Lead[];
+};
+
 function firstRow<T>(value: T | T[] | null): T | null {
   return Array.isArray(value) ? value[0] ?? null : value;
 }
@@ -161,7 +168,28 @@ export async function getTeamAccess(teamId: string | null, userId: string): Prom
   };
 }
 
-export async function loadTeamLeads(teamId: string): Promise<Lead[]> {
+export async function loadTeamLeads(teamId: string, page = 0): Promise<PaginatedLeads> {
+  const from = page * LEADS_PAGE_SIZE;
+  const to = from + LEADS_PAGE_SIZE; // inclusive; fetches PAGE_SIZE + 1 to detect more
+  const { data, error } = await supabase
+    .from('scanned_leads')
+    .select(`${LEAD_SELECT_FIELDS}, lead_assignments!left(assigned_at, assignment_state, assigned_to_user_id)`)
+    .eq('team_id', teamId)
+    .order('created_at', { ascending: false })
+    .range(from, to);
+  if (error) throw new Error(error.message);
+  const rows = (data ?? []) as unknown as LeadRow[];
+  const hasMore = rows.length > LEADS_PAGE_SIZE;
+  return {
+    hasMore,
+    leads: (hasMore ? rows.slice(0, LEADS_PAGE_SIZE) : rows).map(mapLead)
+  };
+}
+
+// ponytail: unbounded on purpose — AssignPage needs every lead to build its
+// leadById map and the assigned/unassigned split. Paginate it (or move the split
+// server-side) when a single team's lead count makes this payload hurt.
+export async function loadAllTeamLeads(teamId: string): Promise<Lead[]> {
   const { data, error } = await supabase
     .from('scanned_leads')
     .select(`${LEAD_SELECT_FIELDS}, lead_assignments!left(assigned_at, assignment_state, assigned_to_user_id)`)
@@ -171,27 +199,38 @@ export async function loadTeamLeads(teamId: string): Promise<Lead[]> {
   return ((data ?? []) as unknown as LeadRow[]).map(mapLead);
 }
 
-export async function loadPersonalLeads(userId: string): Promise<Lead[]> {
+export async function loadPersonalLeads(userId: string, page = 0): Promise<PaginatedLeads> {
+  const from = page * LEADS_PAGE_SIZE;
+  const to = from + LEADS_PAGE_SIZE;
   const { data, error } = await supabase
     .from('scanned_leads')
     .select(`${LEAD_SELECT_FIELDS}, lead_assignments!left(assigned_at, assignment_state, assigned_to_user_id)`)
     .eq('user_id', userId)
     .is('team_id', null)
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false })
+    .range(from, to);
   if (error) throw new Error(error.message);
-  return ((data ?? []) as unknown as LeadRow[]).map(mapLead);
+  const rows = (data ?? []) as unknown as LeadRow[];
+  const hasMore = rows.length > LEADS_PAGE_SIZE;
+  return {
+    hasMore,
+    leads: (hasMore ? rows.slice(0, LEADS_PAGE_SIZE) : rows).map(mapLead)
+  };
 }
 
-export async function loadAssignedLeads(teamId: string, userId: string): Promise<Lead[]> {
+export async function loadAssignedLeads(teamId: string, userId: string, page = 0): Promise<PaginatedLeads> {
+  const from = page * LEADS_PAGE_SIZE;
+  const to = from + LEADS_PAGE_SIZE;
   const { data, error } = await supabase
     .from('lead_assignments')
     .select(`assigned_at, assignment_state, assigned_to_user_id, scanned_leads!inner(${LEAD_SELECT_FIELDS})`)
     .eq('team_id', teamId)
     .eq('assigned_to_user_id', userId)
-    .order('assigned_at', { ascending: false });
+    .order('assigned_at', { ascending: false })
+    .range(from, to);
   if (error) throw new Error(error.message);
 
-  return ((data ?? []) as unknown as AssignmentRow[])
+  const allRows = ((data ?? []) as unknown as AssignmentRow[])
     .map((row) => {
       const lead = firstRow(row.scanned_leads ?? null);
       return lead
@@ -206,6 +245,12 @@ export async function loadAssignedLeads(teamId: string, userId: string): Promise
         : null;
     })
     .filter((lead): lead is Lead => lead !== null);
+
+  const hasMore = allRows.length > LEADS_PAGE_SIZE;
+  return {
+    hasMore,
+    leads: hasMore ? allRows.slice(0, LEADS_PAGE_SIZE) : allRows
+  };
 }
 
 export async function loadLead(leadId: string, teamId?: string | null): Promise<Lead> {
